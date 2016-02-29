@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -52,8 +53,13 @@ func (rem *AWSRemediator) attempRemediate(asGroup string) (bool, error) {
 		glog.Error("Error fetching Autoscaling group:", asGroup, " Error:", err)
 		return false, err
 	}
+
+	if len(resp.AutoScalingGroups) == 0 {
+		glog.Error("Autoscaling group with name ", asGroup, " does not exist")
+		return false, errors.New("Auoscaling group does not exist")
+	}
+
 	//We only Get a single AutoScalingGroup
-	//TODO Iterate over multiple
 	as := resp.AutoScalingGroups[0]
 
 	if *as.DesiredCapacity == *as.MaxSize {
@@ -123,6 +129,10 @@ func (rem *AWSRemediator) getCurrentActivity(asg_name string) (*autoscaling.Acti
 
 	if err != nil {
 		return nil, err
+	}
+
+	if len(resp.Activities) == 0 {
+		return nil, errors.New(fmt.Sprintf("No activities for: %s", asg_name))
 	}
 
 	return resp.Activities[0], nil
