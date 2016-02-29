@@ -46,6 +46,7 @@ var (
 	argAPIServerURL       = flag.String("api-server", "http://localhost:8080", "Url endpoint of the k8s api server")
 	argASGroups           = flag.String("as-groups", "", "Comma seperated list of Autoscaling groups to use")
 	argRemediationMinutes = flag.Int64("remediation-timer", 5, "Time in (minutes) until remediation attempt")
+        argSelfTest           = flag.Bool("self-test", false, "Startup Test")
 )
 
 func getAPIServerURL() (string, error) {
@@ -69,6 +70,11 @@ func getAPIClient() (*kclient.Client, error) {
 func main() {
 	flag.Parse()
 	groups := strings.Split(*argASGroups, ",")
+
+        if *argSelfTest {
+           fmt.Println("Started!")
+           return
+        }
 
 	if *argASGroups == "" {
 		panic("No autoscaling groups given")
