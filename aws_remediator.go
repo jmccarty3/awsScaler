@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -72,7 +73,7 @@ func (rem *AWSRemediator) Remediate() (bool, error) {
 	return success, err
 }
 
-func (rem *AWSRemediator) attempRemediate(asGroup string) (bool, error) {
+func (rem *AWSRemediator) getAutoscalingGroup(asGroup string) (*autoscaling.Group, error) {
 	params := &autoscaling.DescribeAutoScalingGroupsInput{
 		AutoScalingGroupNames: []*string{
 			aws.String(asGroup),
@@ -84,16 +85,24 @@ func (rem *AWSRemediator) attempRemediate(asGroup string) (bool, error) {
 
 	if err != nil {
 		glog.Error("Error fetching Autoscaling group:", asGroup, " Error:", err)
-		return false, err
+		return nil, err
 	}
 
 	if len(resp.AutoScalingGroups) == 0 {
 		glog.Error("Autoscaling group with name ", asGroup, " does not exist")
-		return false, errors.New("Auoscaling group does not exist")
+		return nil, errors.New("Auoscaling group does not exist")
 	}
 
+	return resp.AutoScalingGroups[0], nil
+}
+
+func (rem *AWSRemediator) attempRemediate(asGroup string) (bool, error) {
 	//We only Get a single AutoScalingGroup
-	as := resp.AutoScalingGroups[0]
+	as, err := rem.getAutoscalingGroup(asGroup)
+
+	if err != nil {
+		return false, err
+	}
 
 	if *as.DesiredCapacity == *as.MaxSize {
 		glog.Warning("Autoscaling group already at max size")
@@ -107,7 +116,16 @@ func (rem *AWSRemediator) attempRemediate(asGroup string) (bool, error) {
 		}
 
 		if rem.checkIsWaitingForSpot(activity) {
-			glog.Info("Autoscaling group is cluster waiting on spot work")
+			spotTimeout := 2 //TODO Make configurable if stays
+			glog.Info("Autoscaling group is cluster waiting on spot work. Giving ", spotTimeout, " for instance increase")
+			i := len(as.Instances)
+			time.Sleep(time.Duration(spotTimeout) * time.Minute)
+			as, err = rem.getAutoscalingGroup(asGroup)
+			if i >= len(as.Instances) {
+				glog.Error("Instance group as not increased members. Assuming the worst")
+				return false, errors.New("Spot cluster increase seems to have failed")
+			}
+
 		}
 	} else {
 		glog.Error("Could not get current ASG activity", err)
