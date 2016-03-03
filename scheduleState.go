@@ -27,7 +27,7 @@ func NewScheduleState() *scheduleState {
 func (s *scheduleState) setPodState(name, reason string) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	glog.Infof("Adding Pod: %s with Reason: %s to state", name, reason)
+	glog.V(4).Infof("Adding Pod: %s with Reason: %s to state", name, reason)
 	s.failedPods[name] = &failedPod{
 		Reason:       reason,
 		Remediations: 0,

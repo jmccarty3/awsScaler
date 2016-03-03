@@ -49,6 +49,11 @@ var (
 	argSelfTest           = flag.Bool("self-test", false, "Startup Test")
 )
 
+type Resources struct {
+	CPU   int64
+	MemMB int64
+}
+
 func getAPIServerURL() (string, error) {
 	//More parsing later
 	url, err := url.Parse(*argAPIServerURL)

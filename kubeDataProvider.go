@@ -14,7 +14,10 @@ import (
 	"k8s.io/kubernetes/pkg/util"
 )
 
-const NodeNodesAvailable = "NoNodesAvailable"
+const (
+	NodeNodesAvailable   = "NoNodesAvailable"
+	UnknownScheduleIssue = "UnknownIssue"
+)
 
 type kubeDataProvider struct {
 	client *kclient.Client
@@ -77,7 +80,7 @@ func ExtractFailureReason(reason string) string {
 	if len(results) > 1 {
 		return NodeNodesAvailable
 	}
-	return "Unknown"
+	return UnknownScheduleIssue
 }
 
 func CreateMetaKeyFromEvent(event *api.Event) string {
@@ -109,12 +112,29 @@ func (k *kubeDataProvider) createPodController() {
 		0,
 		framework.ResourceEventHandlerFuncs{
 			DeleteFunc: func(oldObj interface{}) {
-				glog.Info("Deleting pod: ", oldObj.(*api.Pod).Name)
+				glog.V(4).Info("Deleting pod: ", oldObj.(*api.Pod).Name)
 				key, _ := cache.MetaNamespaceKeyFunc(oldObj.(*api.Pod))
 				k.state.removePod(key)
 			},
 		},
 	)
+}
+
+func (k *kubeDataProvider) getNeededResources(pods []string) *Resources {
+	var cpu, mem int64
+	for _, pod := range pods {
+		if p, exists, _ := k.pods.Get(pod); exists {
+			for _, c := range p.(*api.Pod).Spec.Containers {
+				cpu += c.Resources.Requests.Cpu().MilliValue()
+				mem += c.Resources.Requests.Memory().MilliValue()
+			}
+		}
+	}
+
+	return &Resources{
+		CPU:   cpu,
+		MemMB: mem,
+	}
 }
 
 func (k *kubeDataProvider) Run(groups []string) {
@@ -138,6 +158,8 @@ func (k *kubeDataProvider) Run(groups []string) {
 		//TODO: Move this logic
 		if len(k.state.getCurrentState()) > 0 {
 			glog.Warning("Nodes in need for remediation. Requesting response")
+			r := k.getNeededResources(k.state.getPods())
+			glog.Infof("Missing Resources. CPU: %d  MemMB: %d", r.CPU, r.MemMB)
 			if ok, err := rem.Remediate(); ok {
 				glog.Info("Remediation request successful")
 				k.state.incrementRemediations()

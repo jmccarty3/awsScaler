@@ -3,12 +3,17 @@ package main
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
+	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/golang/glog"
 )
+
+var mapSync sync.Once
+var resources map[string]Resources
 
 type AWSRemediator struct {
 	client   *autoscaling.AutoScaling
@@ -21,6 +26,34 @@ func NewAWSRemediator(asGroups []string) *AWSRemediator {
 			Region: aws.String("us-east-1"),
 		})),
 		asGroups: asGroups,
+	}
+}
+
+func getResourceForInstanceType(instance_type string) Resources {
+	mapSync.Do(func() {
+		resources = make(map[string]Resources)
+		resources[ec2.InstanceTypeC44xlarge] = Resources{
+			CPU:   16,
+			MemMB: 30000,
+		}
+		resources[ec2.InstanceTypeM42xlarge] = Resources{
+			CPU:   8,
+			MemMB: 32000,
+		}
+		resources[ec2.InstanceTypeM44xlarge] = Resources{
+			CPU:   16,
+			MemMB: 64000,
+		}
+	})
+
+	if r, exists := resources[instance_type]; exists {
+		return r
+	}
+
+	glog.Warning("Could not find instance type:", instance_type)
+	return Resources{
+		CPU:   0,
+		MemMB: 0,
 	}
 }
 
