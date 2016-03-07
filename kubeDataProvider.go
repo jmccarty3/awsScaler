@@ -123,11 +123,13 @@ func (k *kubeDataProvider) createPodController() {
 func (k *kubeDataProvider) getNeededResources(pods []string) *Resources {
 	var cpu, mem int64
 	for _, pod := range pods {
-		if p, exists, _ := k.pods.Get(pod); exists {
+		if p, exists, _ := k.pods.GetByKey(pod); exists {
 			for _, c := range p.(*api.Pod).Spec.Containers {
 				cpu += c.Resources.Requests.Cpu().MilliValue()
-				mem += c.Resources.Requests.Memory().MilliValue()
+				mem += c.Resources.Requests.Memory().Value()
 			}
+		} else {
+			glog.Error("Does not exist: ", pod)
 		}
 	}
 
