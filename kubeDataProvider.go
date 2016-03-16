@@ -126,7 +126,7 @@ func (k *kubeDataProvider) getNeededResources(pods []string) *Resources {
 		if p, exists, _ := k.pods.GetByKey(pod); exists {
 			for _, c := range p.(*api.Pod).Spec.Containers {
 				cpu += c.Resources.Requests.Cpu().MilliValue()
-				mem += c.Resources.Requests.Memory().Value()
+				mem += c.Resources.Requests.Memory().MilliValue()
 			}
 		} else {
 			glog.Error("Does not exist: ", pod)
