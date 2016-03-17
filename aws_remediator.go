@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -30,32 +31,29 @@ func NewAWSRemediator(asGroups []string) *AWSRemediator {
 	}
 }
 
-func getResourceForInstanceType(instance_type string) Resources {
+func getResourceForInstanceType(instance_type *string) Resources {
 	mapSync.Do(func() {
 		resources = make(map[string]Resources)
 		resources[ec2.InstanceTypeC44xlarge] = Resources{
-			CPU:   16,
+			CPU:   16000,
 			MemMB: 30000,
 		}
 		resources[ec2.InstanceTypeM42xlarge] = Resources{
-			CPU:   8,
+			CPU:   8000,
 			MemMB: 32000,
 		}
 		resources[ec2.InstanceTypeM44xlarge] = Resources{
-			CPU:   16,
+			CPU:   16000,
 			MemMB: 64000,
 		}
 	})
 
-	if r, exists := resources[instance_type]; exists {
+	if r, exists := resources[*instance_type]; exists {
 		return r
 	}
 
 	glog.Warning("Could not find instance type:", instance_type)
-	return Resources{
-		CPU:   0,
-		MemMB: 0,
-	}
+	return EmptyResources
 }
 
 func (rem *AWSRemediator) Remediate() (bool, error) {
@@ -148,26 +146,60 @@ func (rem *AWSRemediator) scaleGroup(name string, size int64) error {
 	return err
 }
 
-func (rem *AWSRemediator) checkIsSpotCluster(configName string) (bool, error) {
+func getLaunchConfig(client *autoscaling.AutoScaling, groupName string) (*autoscaling.LaunchConfiguration, error) {
 	params := &autoscaling.DescribeLaunchConfigurationsInput{
 		LaunchConfigurationNames: []*string{
-			aws.String(configName),
+			aws.String(groupName),
 		},
 		MaxRecords: aws.Int64(1),
 	}
 
-	resp, err := rem.client.DescribeLaunchConfigurations(params)
+	resp, err := client.DescribeLaunchConfigurations(params)
 
 	if err != nil {
-		glog.Error("Error getting LaunchConfig: ", configName, " Error:", err)
-		return false, err
+		glog.Error("Error getting LaunchConfig: ", groupName, " Error:", err)
+		return nil, err
 	}
 
 	if len(resp.LaunchConfigurations) == 0 {
-		glog.Error("Launch Config?", resp, "Name??", configName)
+		glog.Error("Launch Config?", resp, "Name??", groupName)
+		return nil, errors.New("Successful response but no launch configuration found")
 	}
 
-	return resp.LaunchConfigurations[0].SpotPrice == nil, nil
+	return resp.LaunchConfigurations[0], nil
+}
+
+func calculatedNeededServersForConfig(config *autoscaling.LaunchConfiguration, resources *Resources) int {
+	congfigResources := getResourceForInstanceType(config.InstanceType)
+
+	if congfigResources == EmptyResources {
+		return 1
+	}
+
+	byCPU := math.Ceil(float64(resources.CPU) / float64(congfigResources.CPU))
+	byMem := math.Ceil(float64(resources.MemMB) / float64(congfigResources.MemMB))
+
+	val := int(math.Max(byCPU, byMem))
+
+	if val == 0 {
+		return 1
+	}
+
+	return val
+}
+
+func (rem *AWSRemediator) groupIsSpotCluster(clusterName string) (bool, error) {
+	config, err := getLaunchConfig(rem.client, clusterName)
+
+	if err != nil {
+		return false, err
+	}
+
+	return isSpotConfig(config), nil
+}
+
+func isSpotConfig(config *autoscaling.LaunchConfiguration) bool {
+	return config.SpotPrice != nil
 }
 
 func (rem *AWSRemediator) getCurrentActivity(asg_name string) (*autoscaling.Activity, error) {
