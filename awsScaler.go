@@ -46,6 +46,7 @@ var (
 	argAPIServerURL       = flag.String("api-server", "http://localhost:8080", "Url endpoint of the k8s api server")
 	argASGroups           = flag.String("as-groups", "", "Comma seperated list of Autoscaling groups to use")
 	argRemediationMinutes = flag.Int64("remediation-timer", 5, "Time in (minutes) until remediation attempt")
+	argSyncNow            = flag.Bool("sync-now", false, "Sync as soon as initial sync is complete")
 	argSelfTest           = flag.Bool("self-test", false, "Startup Test")
 )
 

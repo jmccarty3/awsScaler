@@ -23,6 +23,7 @@ type kubeDataProvider struct {
 	client *kclient.Client
 	state  *scheduleState
 	pods   cache.StoreToPodLister
+	rem    *AWSRemediator
 
 	eventController *framework.Controller
 	podController   *framework.Controller
@@ -126,7 +127,7 @@ func (k *kubeDataProvider) getNeededResources(pods []string) *Resources {
 		if p, exists, _ := k.pods.GetByKey(pod); exists {
 			for _, c := range p.(*api.Pod).Spec.Containers {
 				cpu += c.Resources.Requests.Cpu().MilliValue()
-				mem += c.Resources.Requests.Memory().MilliValue()
+				mem += c.Resources.Requests.Memory().Value() / (1024 * 1024) // Memory is returned as the full value. We want it truncated to Megabytes
 			}
 		} else {
 			glog.Error("Does not exist: ", pod)
@@ -136,6 +137,25 @@ func (k *kubeDataProvider) getNeededResources(pods []string) *Resources {
 	return &Resources{
 		CPU:   cpu,
 		MemMB: mem,
+	}
+}
+
+func (k *kubeDataProvider) doWork() {
+	k.recolmation()
+
+	glog.V(4).Info("StateGraph:", k.state.failedPods, " FailedMaps:", k.state.getCurrentState())
+
+	//TODO: Move this logic
+	if len(k.state.getCurrentState()) > 0 {
+		glog.Warning("Nodes in need for remediation. Requesting response")
+		r := k.getNeededResources(k.state.getPods())
+		glog.Infof("Missing Resources. CPU: %d  MemMB: %d Pod Count: %d", r.CPU, r.MemMB, len(k.state.getPods()))
+		if ok, err := k.rem.Remediate(*r); ok {
+			glog.Info("Remediation request successful")
+			k.state.incrementRemediations()
+		} else {
+			glog.Error("Remediation failed!", err)
+		}
 	}
 }
 
@@ -149,25 +169,15 @@ func (k *kubeDataProvider) Run(groups []string) {
 	}
 	glog.Info("Initial PodController sync complete")
 
-	rem := NewAWSRemediator(groups)
+	k.rem = NewAWSRemediator(groups)
+
+	if *argSyncNow {
+		k.doWork()
+	}
 
 	for {
 		time.Sleep(time.Minute * time.Duration(*argRemediationMinutes))
-		k.recolmation()
+		k.doWork()
 
-		glog.V(4).Info("StateGraph:", k.state.failedPods, " FailedMaps:", k.state.getCurrentState())
-
-		//TODO: Move this logic
-		if len(k.state.getCurrentState()) > 0 {
-			glog.Warning("Nodes in need for remediation. Requesting response")
-			r := k.getNeededResources(k.state.getPods())
-			glog.Infof("Missing Resources. CPU: %d  MemMB: %d", r.CPU, r.MemMB)
-			if ok, err := rem.Remediate(*r); ok {
-				glog.Info("Remediation request successful")
-				k.state.incrementRemediations()
-			} else {
-				glog.Error("Remediation failed!", err)
-			}
-		}
 	}
 }

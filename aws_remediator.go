@@ -34,6 +34,10 @@ func NewAWSRemediator(asGroups []string) *AWSRemediator {
 func getResourceForInstanceType(instance_type *string) Resources {
 	mapSync.Do(func() {
 		resources = make(map[string]Resources)
+		resources[ec2.InstanceTypeC42xlarge] = Resources{
+			CPU:   8000,
+			MemMB: 15000,
+		}
 		resources[ec2.InstanceTypeC44xlarge] = Resources{
 			CPU:   16000,
 			MemMB: 30000,
@@ -63,7 +67,8 @@ func (rem *AWSRemediator) Remediate(neededResources Resources) (bool, error) {
 		glog.Info("Attempting to Remediate using group: ", group)
 		if success, neededResources, err = rem.attemptRemediate(group, neededResources); success {
 			if neededResources != EmptyResources {
-				glog.Infof("Autoscaling group %s did not fully meet resource need.", group)
+				glog.Infof("Autoscaling group %s did not fully meet resource need. NeededResources %v", group, neededResources)
+				success = false
 				continue
 			}
 			glog.Info("Remediation successful")
@@ -134,14 +139,19 @@ func (rem *AWSRemediator) attemptRemediate(asGroup string, neededResources Resou
 	}
 
 	//Determine how many servers we should
-	launchConfig, _ := getLaunchConfig(rem.client, asGroup)
+	launchConfig, _ := getLaunchConfig(rem.client, *as.LaunchConfigurationName)
 	neededCount, resourcePerMachine := calculatedNeededServersForConfig(launchConfig, &neededResources)
 
-	if int64(neededCount) > *as.MaxSize {
-		neededCount = int(*as.MaxSize) //No risk of truncate since Max Size cannot be anywhere need max int
+	glog.Infof("Need %v servers from group %s", neededCount, asGroup)
+
+	sizeToScaleTo := len(as.Instances) + neededCount
+	if sizeToScaleTo > int(*as.MaxSize) {
+		neededCount = sizeToScaleTo - int(*as.MaxSize)
+		sizeToScaleTo = int(*as.MaxSize) //No risk of truncate since Max Size cannot be anywhere need max int
+		glog.Info("Desired capacity too large. Setting to Max")
 	}
 
-	err = rem.scaleGroup(asGroup, int64(neededCount))
+	err = rem.scaleGroup(asGroup, int64(sizeToScaleTo))
 	glog.Info("Requested group capacity increase for:", asGroup)
 
 	if err != nil {
@@ -149,6 +159,12 @@ func (rem *AWSRemediator) attemptRemediate(asGroup string, neededResources Resou
 	}
 
 	resourcePerMachine.Scale(int64(neededCount))
+
+	if resourcePerMachine == EmptyResources {
+		glog.Warning("Unable to determine now many resources were created. Optimistically assuming everything is fixed")
+		return true, EmptyResources, nil
+	}
+
 	remainingNeed := neededResources
 	remainingNeed.Remove(&resourcePerMachine)
 	return true, remainingNeed, nil
@@ -162,14 +178,15 @@ func (rem *AWSRemediator) scaleGroup(name string, size int64) error {
 	}
 
 	_, err := rem.client.SetDesiredCapacity(params)
+	glog.Infof("Requested AS Group %s be set to capacity %v", name, size)
 
 	return err
 }
 
-func getLaunchConfig(client *autoscaling.AutoScaling, groupName string) (*autoscaling.LaunchConfiguration, error) {
+func getLaunchConfig(client *autoscaling.AutoScaling, configName string) (*autoscaling.LaunchConfiguration, error) {
 	params := &autoscaling.DescribeLaunchConfigurationsInput{
 		LaunchConfigurationNames: []*string{
-			aws.String(groupName),
+			aws.String(configName),
 		},
 		MaxRecords: aws.Int64(1),
 	}
@@ -177,12 +194,12 @@ func getLaunchConfig(client *autoscaling.AutoScaling, groupName string) (*autosc
 	resp, err := client.DescribeLaunchConfigurations(params)
 
 	if err != nil {
-		glog.Error("Error getting LaunchConfig: ", groupName, " Error:", err)
+		glog.Error("Error getting LaunchConfig: ", configName, " Error:", err)
 		return nil, err
 	}
 
 	if len(resp.LaunchConfigurations) == 0 {
-		glog.Error("Launch Config?", resp, "Name??", groupName)
+		glog.Error("Launch Config?", resp, "Name??", configName)
 		return nil, errors.New("Successful response but no launch configuration found")
 	}
 
