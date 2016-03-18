@@ -56,12 +56,16 @@ func getResourceForInstanceType(instance_type *string) Resources {
 	return EmptyResources
 }
 
-func (rem *AWSRemediator) Remediate() (bool, error) {
+func (rem *AWSRemediator) Remediate(neededResources Resources) (bool, error) {
 	success := false
 	var err error
 	for _, group := range rem.asGroups {
 		glog.Info("Attempting to Remediate using group: ", group)
-		if success, err = rem.attempRemediate(group); success {
+		if success, neededResources, err = rem.attemptRemediate(group, neededResources); success {
+			if neededResources != EmptyResources {
+				glog.Infof("Autoscaling group %s did not fully meet resource need.", group)
+				continue
+			}
 			glog.Info("Remediation successful")
 			break
 		}
@@ -94,23 +98,23 @@ func (rem *AWSRemediator) getAutoscalingGroup(asGroup string) (*autoscaling.Grou
 	return resp.AutoScalingGroups[0], nil
 }
 
-func (rem *AWSRemediator) attempRemediate(asGroup string) (bool, error) {
+func (rem *AWSRemediator) attemptRemediate(asGroup string, neededResources Resources) (bool, Resources, error) {
 	//We only Get a single AutoScalingGroup
 	as, err := rem.getAutoscalingGroup(asGroup)
 
 	if err != nil {
-		return false, err
+		return false, neededResources, err
 	}
 
 	if *as.DesiredCapacity == *as.MaxSize {
 		glog.Warning("Autoscaling group already at max size")
-		return false, errors.New("Failed to scale")
+		return false, neededResources, errors.New("Failed to scale")
 	}
 
 	if activity, err := rem.getCurrentActivity(asGroup); err == nil {
 		//TODO Probably a good idea to look at errors
 		if rem.checkPreInService(activity) {
-			return false, errors.New("Autoscaling group in pre service")
+			return false, neededResources, errors.New("Autoscaling group in pre service")
 		}
 
 		if rem.checkIsWaitingForSpot(activity) {
@@ -121,7 +125,7 @@ func (rem *AWSRemediator) attempRemediate(asGroup string) (bool, error) {
 			as, err = rem.getAutoscalingGroup(asGroup)
 			if i >= len(as.Instances) {
 				glog.Error("Instance group as not increased members. Assuming the worst")
-				return false, errors.New("Spot cluster increase seems to have failed")
+				return false, neededResources, errors.New("Spot cluster increase seems to have failed")
 			}
 
 		}
@@ -129,9 +133,25 @@ func (rem *AWSRemediator) attempRemediate(asGroup string) (bool, error) {
 		glog.Error("Could not get current ASG activity", err)
 	}
 
-	err = rem.scaleGroup(asGroup, (*as.DesiredCapacity + 1))
+	//Determine how many servers we should
+	launchConfig, _ := getLaunchConfig(rem.client, asGroup)
+	neededCount, resourcePerMachine := calculatedNeededServersForConfig(launchConfig, &neededResources)
+
+	if int64(neededCount) > *as.MaxSize {
+		neededCount = int(*as.MaxSize) //No risk of truncate since Max Size cannot be anywhere need max int
+	}
+
+	err = rem.scaleGroup(asGroup, int64(neededCount))
 	glog.Info("Requested group capacity increase for:", asGroup)
-	return err == nil, err
+
+	if err != nil {
+		return false, neededResources, err
+	}
+
+	resourcePerMachine.Scale(int64(neededCount))
+	remainingNeed := neededResources
+	remainingNeed.Remove(&resourcePerMachine)
+	return true, remainingNeed, nil
 }
 
 func (rem *AWSRemediator) scaleGroup(name string, size int64) error {
@@ -169,11 +189,11 @@ func getLaunchConfig(client *autoscaling.AutoScaling, groupName string) (*autosc
 	return resp.LaunchConfigurations[0], nil
 }
 
-func calculatedNeededServersForConfig(config *autoscaling.LaunchConfiguration, resources *Resources) int {
+func calculatedNeededServersForConfig(config *autoscaling.LaunchConfiguration, resources *Resources) (int, Resources) {
 	congfigResources := getResourceForInstanceType(config.InstanceType)
 
 	if congfigResources == EmptyResources {
-		return 1
+		return 1, EmptyResources
 	}
 
 	byCPU := math.Ceil(float64(resources.CPU) / float64(congfigResources.CPU))
@@ -182,10 +202,10 @@ func calculatedNeededServersForConfig(config *autoscaling.LaunchConfiguration, r
 	val := int(math.Max(byCPU, byMem))
 
 	if val == 0 {
-		return 1
+		return 1, EmptyResources
 	}
 
-	return val
+	return val, congfigResources
 }
 
 func (rem *AWSRemediator) groupIsSpotCluster(clusterName string) (bool, error) {

@@ -47,14 +47,7 @@ var (
 	argASGroups           = flag.String("as-groups", "", "Comma seperated list of Autoscaling groups to use")
 	argRemediationMinutes = flag.Int64("remediation-timer", 5, "Time in (minutes) until remediation attempt")
 	argSelfTest           = flag.Bool("self-test", false, "Startup Test")
-
-	EmptyResources = Resources{CPU: 0, MemMB: 0}
 )
-
-type Resources struct {
-	CPU   int64
-	MemMB int64
-}
 
 func getAPIServerURL() (string, error) {
 	//More parsing later

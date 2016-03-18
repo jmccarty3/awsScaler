@@ -85,7 +85,7 @@ func TestCalculateServers(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if actual := calculatedNeededServersForConfig(test.config, test.resourcesNeeded); actual != test.expected {
+		if actual, _ := calculatedNeededServersForConfig(test.config, test.resourcesNeeded); actual != test.expected {
 			t.Errorf("%s Failed. Expected: %d, Got: %d", test.test, test.expected, actual)
 		}
 	}

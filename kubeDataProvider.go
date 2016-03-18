@@ -162,7 +162,7 @@ func (k *kubeDataProvider) Run(groups []string) {
 			glog.Warning("Nodes in need for remediation. Requesting response")
 			r := k.getNeededResources(k.state.getPods())
 			glog.Infof("Missing Resources. CPU: %d  MemMB: %d", r.CPU, r.MemMB)
-			if ok, err := rem.Remediate(); ok {
+			if ok, err := rem.Remediate(*r); ok {
 				glog.Info("Remediation request successful")
 				k.state.incrementRemediations()
 			} else {
