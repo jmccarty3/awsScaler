@@ -146,9 +146,9 @@ func (rem *AWSRemediator) attemptRemediate(asGroup string, neededResources Resou
 
 	sizeToScaleTo := len(as.Instances) + neededCount
 	if sizeToScaleTo > int(*as.MaxSize) {
-		neededCount = sizeToScaleTo - int(*as.MaxSize)
-		sizeToScaleTo = int(*as.MaxSize) //No risk of truncate since Max Size cannot be anywhere need max int
-		glog.Info("Desired capacity too large. Setting to Max")
+		neededCount = int(*as.MaxSize) - len(as.Instances)
+		sizeToScaleTo = int(*as.MaxSize) //No risk of truncate since Max Size cannot be anywhere near max int
+		glog.Info("Desired capacity too large. Setting to Max.")
 	}
 
 	err = rem.scaleGroup(asGroup, int64(sizeToScaleTo))
