@@ -118,8 +118,8 @@ func (rem *AWSRemediator) attemptRemediate(asGroup string, neededResources Resou
 
 	if activity, err := rem.getCurrentActivity(asGroup); err == nil {
 		//TODO Probably a good idea to look at errors
-		if *activity.StatusCode == autoscaling.ScalingActivityStatusCodeFailed {
-			return false, neededResources, errors.New("Autoscaling group last activity failed. Assuming the worst")
+		if *activity.StatusCode == autoscaling.ScalingActivityStatusCodeFailed && int(*as.DesiredCapacity) > len(as.Instances) {
+			return false, neededResources, errors.New("Autoscaling group last activity failed and desired count exceeds current count. Assuming the worst")
 		}
 
 		if rem.checkPreInService(activity) {
