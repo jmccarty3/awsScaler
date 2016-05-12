@@ -7,8 +7,6 @@ import:
   version: 1.9.0
 - package: github.com/docker/libcontainer
 - package: k8s.io/kubernetes
-  version: 1.1.7
+  version: 1.2.0
   subpackages:
   - pkg/client/unversioned
-- package: speter.net/go/exp/math/dec/inf
-  version: 42ca6cd68aa922bc3f32f1e056e61b65945d9ad7

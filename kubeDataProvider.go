@@ -11,7 +11,7 @@ import (
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/controller/framework"
 	"k8s.io/kubernetes/pkg/fields"
-	"k8s.io/kubernetes/pkg/util"
+	"k8s.io/kubernetes/pkg/util/wait"
 )
 
 const (
@@ -162,8 +162,8 @@ func (k *kubeDataProvider) doWork() {
 
 func (k *kubeDataProvider) Run(groups []string) {
 
-	go k.podController.Run(util.NeverStop)
-	go k.eventController.Run(util.NeverStop)
+	go k.podController.Run(wait.NeverStop)
+	go k.eventController.Run(wait.NeverStop)
 	glog.Info("Waiting for PodContoller sync")
 	for k.podController.HasSynced() == false {
 		time.Sleep(1 * time.Second)

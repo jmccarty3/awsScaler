@@ -9,6 +9,7 @@ import (
 	"github.com/golang/glog"
 
 	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/client/restclient"
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/fields"
 	"k8s.io/kubernetes/pkg/labels"
@@ -50,6 +51,7 @@ var (
 	argSelfTest           = flag.Bool("self-test", false, "Startup Test")
 )
 
+//TODO: Support incluster Config
 func getAPIServerURL() (string, error) {
 	//More parsing later
 	url, err := url.Parse(*argAPIServerURL)
@@ -63,9 +65,13 @@ func getAPIClient() (*kclient.Client, error) {
 		glog.Error(err)
 		return nil, err
 	}
-	return kclient.New(&kclient.Config{
+	var restConfig *restclient.Config
+
+	restConfig = &restclient.Config{
 		Host: url,
-	})
+	}
+
+	return kclient.New(restConfig)
 }
 
 func main() {
@@ -84,7 +90,13 @@ func main() {
 	c, _ := getAPIClient()
 	v, e := c.ServerVersion()
 	fmt.Println("Version:", v)
-	l, e := c.Pods("default").List(labels.Everything(), fields.Everything())
+
+	ops := api.ListOptions{
+		LabelSelector: labels.Everything(),
+		FieldSelector: fields.Everything(),
+	}
+
+	l, e := c.Pods("default").List(ops)
 
 	if e != nil {
 		glog.Error("Oh Noes on pod list", e)
