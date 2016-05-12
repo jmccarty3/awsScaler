@@ -42,7 +42,8 @@ func newKubeDataProvider(client *kclient.Client) *kubeDataProvider {
 
 func createEventListWatcher(client *kclient.Client) *cache.ListWatch {
 	//s, _ := fields.ParseSelector("involvedObject.kind=Pod")
-	s, _ := fields.ParseSelector("source=scheduler")
+	//s, _ := fields.ParseSelector("source=scheduler")
+	s := fields.Everything()
 	return cache.NewListWatchFromClient(client, "events", api.NamespaceAll, s)
 }
 
