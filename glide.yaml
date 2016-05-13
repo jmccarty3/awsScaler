@@ -3,10 +3,11 @@ import:
 - package: github.com/aws/aws-sdk-go
   subpackages:
   - aws
+- package: speter.net/go/exp/math/dec/inf
+  repo: git@github.com:go-inf/inf.git
 - package: github.com/docker/docker
-  version: 1.9.0
-- package: github.com/docker/libcontainer
+  version: 1.9.1
 - package: k8s.io/kubernetes
-  version: 1.2.0
+  version: 1.2.4
   subpackages:
   - pkg
