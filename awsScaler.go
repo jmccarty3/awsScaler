@@ -3,16 +3,16 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"net/url"
-	"strings"
+
+	"gopkg.in/yaml.v2"
 
 	"github.com/golang/glog"
 
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/client/restclient"
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
-	"k8s.io/kubernetes/pkg/fields"
-	"k8s.io/kubernetes/pkg/labels"
 )
 
 /* Reasons
@@ -38,14 +38,13 @@ import (
 */
 
 const (
-	FailedScheduling = "FailedScheduling"
-	Scheduled        = "Scheduled"
-	MaxRemediations  = 5
+	Scheduled       = "Scheduled"
+	MaxRemediations = 5
 )
 
 var (
 	argAPIServerURL       = flag.String("api-server", "http://localhost:8080", "Url endpoint of the k8s api server")
-	argASGroups           = flag.String("as-groups", "", "Comma seperated list of Autoscaling groups to use")
+	argConfigFile         = flag.String("config", "", "Path to the configuration file")
 	argRemediationMinutes = flag.Int64("remediation-timer", 5, "Time in (minutes) until remediation attempt")
 	argSyncNow            = flag.Bool("sync-now", false, "Sync as soon as initial sync is complete")
 	argSelfTest           = flag.Bool("self-test", false, "Startup Test")
@@ -76,39 +75,40 @@ func getAPIClient() (*kclient.Client, error) {
 
 func main() {
 	flag.Parse()
-	groups := strings.Split(*argASGroups, ",")
 
 	if *argSelfTest {
 		fmt.Println("Started!")
 		return
 	}
 
-	if *argASGroups == "" {
-		panic("No autoscaling groups given")
+	if *argConfigFile == "" {
+		panic("No config file given")
+	}
+
+	var config Config
+
+	configData, err := ioutil.ReadFile(*argConfigFile)
+	if err != nil {
+		panic(fmt.Sprintf("Error loading conifg file: %v", err))
+	}
+
+	err = yaml.Unmarshal(configData, &config)
+
+	if err != nil {
+		panic(fmt.Sprintf("Error parsing config file. %v", err))
 	}
 
 	c, _ := getAPIClient()
-	v, e := c.ServerVersion()
-	fmt.Println("Version:", v)
-
-	ops := api.ListOptions{
-		LabelSelector: labels.Everything(),
-		FieldSelector: fields.Everything(),
-	}
-
-	l, e := c.Pods("default").List(ops)
+	v, e := c.ServerVersion() //Verify we can talk to the server
 
 	if e != nil {
-		glog.Error("Oh Noes on pod list", e)
-		panic("Bail")
+		panic("Unable to fetch server version")
 	} else {
-		for _, p := range l.Items {
-			fmt.Println("Pod:", p.Name)
-		}
+		fmt.Println("Server Version:", v)
 	}
 
 	provider := newKubeDataProvider(c)
-	provider.Run(groups)
+	provider.Run(config.Stratagies)
 
 	c.Pods(api.NamespaceAll)
 

@@ -1,4 +1,4 @@
-package main
+package aws
 
 import (
 	"testing"
@@ -6,6 +6,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/jmccarty3/awsScaler/api"
 )
 
 func buildLaunchConfig(instanceType string) *autoscaling.LaunchConfiguration {
@@ -14,8 +15,8 @@ func buildLaunchConfig(instanceType string) *autoscaling.LaunchConfiguration {
 	}
 }
 
-func makeResources(cpu, mem int64) *Resources {
-	return &Resources{
+func makeResources(cpu, mem int64) *api.Resources {
+	return &api.Resources{
 		CPU:   cpu,
 		MemMB: mem,
 	}
@@ -24,7 +25,7 @@ func makeResources(cpu, mem int64) *Resources {
 func TestCalculateServers(t *testing.T) {
 	tests := []struct {
 		config          *autoscaling.LaunchConfiguration
-		resourcesNeeded *Resources
+		resourcesNeeded *api.Resources
 		expected        int
 		test            string
 	}{

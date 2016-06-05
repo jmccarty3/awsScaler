@@ -2,15 +2,18 @@ package main
 
 import (
 	"fmt"
-	"regexp"
 	"time"
 
 	"github.com/golang/glog"
+	rapi "github.com/jmccarty3/awsScaler/api"
+	"github.com/jmccarty3/awsScaler/api/stratagy"
 	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/api/unversioned"
 	"k8s.io/kubernetes/pkg/client/cache"
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/controller/framework"
 	"k8s.io/kubernetes/pkg/fields"
+	"k8s.io/kubernetes/pkg/labels"
 	"k8s.io/kubernetes/pkg/util/wait"
 )
 
@@ -20,13 +23,12 @@ const (
 )
 
 type kubeDataProvider struct {
-	client *kclient.Client
-	state  *scheduleState
-	pods   cache.StoreToPodLister
-	rem    *AWSRemediator
+	client     *kclient.Client
+	state      *ScheduleState
+	pods       cache.StoreToPodLister
+	stratageis []stratagy.RemediationStratagy
 
-	eventController *framework.Controller
-	podController   *framework.Controller
+	podController *framework.Controller
 }
 
 func newKubeDataProvider(client *kclient.Client) *kubeDataProvider {
@@ -35,7 +37,6 @@ func newKubeDataProvider(client *kclient.Client) *kubeDataProvider {
 		state:  NewScheduleState(),
 	}
 
-	c.createEventController()
 	c.createPodController()
 	return c
 }
@@ -55,56 +56,27 @@ func printEvent(e *api.Event) string {
 	return fmt.Sprintf("Name: %s Reason: %s Source: %s Count: %d Message: %s ", e.Name, e.Reason, e.Source, e.Count, e.Message)
 }
 
-// Remove any lingering events related to non existant pods
 func (k *kubeDataProvider) recolmation() {
-	glog.V(4).Info("Running Recolomation")
-
-	for _, name := range k.state.getPods() {
-		if p, exists, _ := k.pods.GetByKey(name); exists == false || p.(*api.Pod).Status.Phase != api.PodPending {
-			k.state.removePod(name)
+	glog.V(4).Infof("Running Recolomation over %d pods", len(k.pods.Store.List()))
+	remTime := time.Now().Add(-time.Duration(*argRemediationMinutes) * time.Minute)
+	glog.V(4).Infof("Pods must have been created before %v", remTime)
+	// Find unscheduled pods
+	pods, _ := k.pods.List(labels.Everything())
+	for _, pod := range pods {
+		if pod.Status.Phase == api.PodPending && pod.CreationTimestamp.Before(unversioned.NewTime(remTime)) {
+			key, _ := cache.MetaNamespaceKeyFunc(pod)
+			k.state.setPodState(key, pod)
 		}
 	}
 
-}
-
-func ExtractFailureReason(reason string) string {
-	re := regexp.MustCompile("Failed for reason (?P<reason>\\w+\\b)")
-	results := re.FindStringSubmatch(reason)
-
-	if len(results) > 0 {
-		return results[1]
+	// Remove any lingering events related to non existant pods
+	for _, pod := range k.state.getPods() {
+		if p, exists, _ := k.pods.Get(pod); exists == false || p.(*api.Pod).Status.Phase != api.PodPending {
+			key, _ := cache.MetaNamespaceKeyFunc(pod)
+			k.state.removePod(key)
+		}
 	}
-
-	//TODO Thist is not matching
-	re = regexp.MustCompile("(?P<reason>no nodes available)")
-	results = re.FindStringSubmatch(reason)
-
-	if len(results) > 1 {
-		return NodeNodesAvailable
-	}
-	return UnknownScheduleIssue
-}
-
-func CreateMetaKeyFromEvent(event *api.Event) string {
-	return fmt.Sprintf("%s/%s", event.InvolvedObject.Namespace, event.InvolvedObject.Name)
-}
-
-func (k *kubeDataProvider) createEventController() {
-
-	_, k.eventController = framework.NewInformer(
-		createEventListWatcher(k.client),
-		&api.Event{},
-		0,
-		framework.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				glog.V(4).Info("Got Event: ", printEvent(obj.(*api.Event)))
-				if obj.(*api.Event).Reason == FailedScheduling {
-					k.state.setPodState(CreateMetaKeyFromEvent(obj.(*api.Event)), ExtractFailureReason(obj.(*api.Event).Message))
-					fmt.Println("CurrentState:", k.state.getCurrentState())
-				}
-			},
-		},
-	)
+	glog.V(4).Info("Finished Recolomation")
 }
 
 func (k *kubeDataProvider) createPodController() {
@@ -122,20 +94,16 @@ func (k *kubeDataProvider) createPodController() {
 	)
 }
 
-func (k *kubeDataProvider) getNeededResources(pods []string) *Resources {
+func (k *kubeDataProvider) getNeededResources(pods []*api.Pod) *rapi.Resources {
 	var cpu, mem int64
 	for _, pod := range pods {
-		if p, exists, _ := k.pods.GetByKey(pod); exists {
-			for _, c := range p.(*api.Pod).Spec.Containers {
-				cpu += c.Resources.Requests.Cpu().MilliValue()
-				mem += c.Resources.Requests.Memory().Value() / (1024 * 1024) // Memory is returned as the full value. We want it truncated to Megabytes
-			}
-		} else {
-			glog.Error("Does not exist: ", pod)
+		for _, c := range pod.Spec.Containers {
+			cpu += c.Resources.Requests.Cpu().MilliValue()
+			mem += c.Resources.Requests.Memory().Value() / (1024 * 1024) // Memory is returned as the full value. We want it truncated to Megabytes
 		}
 	}
 
-	return &Resources{
+	return &rapi.Resources{
 		CPU:   cpu,
 		MemMB: mem,
 	}
@@ -144,33 +112,40 @@ func (k *kubeDataProvider) getNeededResources(pods []string) *Resources {
 func (k *kubeDataProvider) doWork() {
 	k.recolmation()
 
-	glog.V(4).Info("StateGraph:", k.state.failedPods, " FailedMaps:", k.state.getCurrentState())
+	glog.V(4).Info("StateGraph:", k.state.failedPods)
 
 	//TODO: Move this logic
-	if len(k.state.getCurrentState()) > 0 {
+	if len(k.state.getPods()) > 0 {
 		glog.Warning("Nodes in need for remediation. Requesting response")
-		r := k.getNeededResources(k.state.getPods())
-		glog.Infof("Missing Resources. CPU: %d  MemMB: %d Pod Count: %d", r.CPU, r.MemMB, len(k.state.getPods()))
-		if ok, err := k.rem.Remediate(*r); ok {
-			glog.Info("Remediation request successful")
-			k.state.incrementRemediations()
-		} else {
-			glog.Error("Remediation failed!", err)
+		podsToRemediate := k.state.getPods()
+		podsCanFix := []*api.Pod{}
+
+		for _, s := range k.stratageis {
+			podsCanFix, podsToRemediate = s.FilterPods(podsToRemediate)
+
+			if len(podsCanFix) > 0 {
+				r := k.getNeededResources(podsCanFix)
+				glog.Infof("Missing Resources. CPU: %d  MemMB: %d Pod Count: %d", r.CPU, r.MemMB, len(k.state.getPods()))
+				if unresolved, err := s.DoRemediation(r); *unresolved == rapi.EmptyResources {
+					glog.Info("Remediation request successful")
+				} else {
+					glog.Errorf("Remediation failed. Error: %v Leftover Resources: %v", err, unresolved)
+				}
+			}
 		}
+		k.state.incrementRemediations()
 	}
 }
 
-func (k *kubeDataProvider) Run(groups []string) {
+func (k *kubeDataProvider) Run(stratagies []stratagy.RemediationStratagy) {
 
 	go k.podController.Run(wait.NeverStop)
-	go k.eventController.Run(wait.NeverStop)
 	glog.Info("Waiting for PodContoller sync")
 	for k.podController.HasSynced() == false {
 		time.Sleep(1 * time.Second)
 	}
 	glog.Info("Initial PodController sync complete")
-
-	k.rem = NewAWSRemediator(groups)
+	k.stratageis = stratagies
 
 	if *argSyncNow {
 		k.doWork()

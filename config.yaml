@@ -1,0 +1,5 @@
+stratagies:
+- remediators:
+  - autoScalingGroup:
+      names:
+      - foo

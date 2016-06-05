@@ -3,72 +3,64 @@ package main
 import (
 	"sync"
 
+	"k8s.io/kubernetes/pkg/api"
+
 	"github.com/golang/glog"
 )
 
-type failedPod struct {
-	Reason       string
+//FailedPod represents a pod that has failed to be scheduled
+type FailedPod struct {
 	Remediations int
+	Pod          *api.Pod
 }
 
-type scheduleState struct {
-	failedPods map[string]*failedPod
+//ScheduleState is a collection of pods that have failed to schedule
+type ScheduleState struct {
+	failedPods map[string]*FailedPod
 
 	//This can likely be changed over to a channel if performance becomes an issue
 	lock sync.Mutex
 }
 
-func NewScheduleState() *scheduleState {
-	return &scheduleState{
-		failedPods: make(map[string]*failedPod),
+//NewScheduleState represents pods that have failed to schedule
+func NewScheduleState() *ScheduleState {
+	return &ScheduleState{
+		failedPods: make(map[string]*FailedPod),
 	}
 }
 
-func (s *scheduleState) setPodState(name, reason string) {
+func (s *ScheduleState) setPodState(name string, pod *api.Pod) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	glog.V(4).Infof("Adding Pod: %s with Reason: %s to state", name, reason)
-	s.failedPods[name] = &failedPod{
-		Reason:       reason,
+	glog.V(4).Infof("Adding Pod: %s", name)
+	s.failedPods[name] = &FailedPod{
 		Remediations: 0,
+		Pod:          pod,
 	}
 }
 
-func (s *scheduleState) getPods() []string {
+func (s *ScheduleState) getPods() []*api.Pod {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	keys := make([]string, len(s.failedPods))
+	pods := make([]*api.Pod, len(s.failedPods))
 	i := 0
 
-	for k := range s.failedPods {
-		keys[i] = k
+	for _, p := range s.failedPods {
+		pods[i] = p.Pod
 		i++
 	}
-	return keys
+	return pods
 }
 
-func (s *scheduleState) removePod(name string) {
+func (s *ScheduleState) removePod(name string) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	glog.V(4).Infof("Removing Pod %s from State if exists", name)
 	delete(s.failedPods, name)
 }
 
-func (s *scheduleState) getCurrentState() map[string]int {
-	states := make(map[string]int)
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	for _, p := range s.failedPods {
-		if p.Remediations < MaxRemediations {
-			states[p.Reason] = states[p.Reason] + 1
-		}
-	}
-	return states
-}
-
-func (s *scheduleState) incrementRemediations() {
+func (s *ScheduleState) incrementRemediations() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	for _, p := range s.failedPods {

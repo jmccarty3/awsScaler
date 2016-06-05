@@ -28,3 +28,8 @@ deployment:
     commands:
       - docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
       - docker push jmccarty3/awsscaler
+    branch: asgLocator
+    commands:
+      - docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
+      - docker tag jmccarty3/awsscaler jmccarty3/awsscaler:asg
+      - docker push jmccarty3/awsscaler:asg
