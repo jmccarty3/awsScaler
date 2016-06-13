@@ -111,7 +111,7 @@ func (c *NodeSelectorCondition) UnmarshalYAML(unmarshal func(interface{}) error)
 	if err := unmarshal(&c.Keys); err != nil {
 		return err
 	}
-	fmt.Printf("Labels: %v\n", c.Keys)
+
 	c.NodeSelector = labels.SelectorFromSet(c.Keys)
 	return nil
 }
