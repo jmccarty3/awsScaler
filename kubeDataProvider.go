@@ -133,6 +133,10 @@ func (k *kubeDataProvider) doWork() {
 				}
 			}
 		}
+
+		if len(podsToRemediate) > 0 {
+			glog.Warningf("Unable to find stratagy for %d pods\n", len(podsToRemediate))
+		}
 		k.state.incrementRemediations()
 	}
 }
