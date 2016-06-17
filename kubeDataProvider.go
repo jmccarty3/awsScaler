@@ -8,6 +8,7 @@ import (
 	rapi "github.com/jmccarty3/awsScaler/api"
 	"github.com/jmccarty3/awsScaler/api/stratagy"
 	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/api/resource"
 	"k8s.io/kubernetes/pkg/api/unversioned"
 	"k8s.io/kubernetes/pkg/client/cache"
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
@@ -94,12 +95,26 @@ func (k *kubeDataProvider) createPodController() {
 	)
 }
 
+func getResourceMem(mem *api.ResourceRequirements) int64 {
+	if (*mem.Limits.Cpu() != resource.Quantity{}) {
+		return mem.Limits.Memory().Value() / (1024 * 1024) // Memory is returned as the full value. We want it truncated to Megabytes
+	}
+	return mem.Requests.Memory().Value() / (1024 * 1024) // Memory is returned as the full value. We want it truncated to Megabytes
+}
+
+func getResourceCPU(cpu *api.ResourceRequirements) int64 {
+	if (*cpu.Limits.Cpu() != resource.Quantity{}) {
+		return cpu.Limits.Cpu().MilliValue()
+	}
+	return cpu.Requests.Cpu().MilliValue()
+}
+
 func (k *kubeDataProvider) getNeededResources(pods []*api.Pod) *rapi.Resources {
 	var cpu, mem int64
 	for _, pod := range pods {
 		for _, c := range pod.Spec.Containers {
-			cpu += c.Resources.Requests.Cpu().MilliValue()
-			mem += c.Resources.Requests.Memory().Value() / (1024 * 1024) // Memory is returned as the full value. We want it truncated to Megabytes
+			cpu += getResourceCPU(&c.Resources)
+			mem += getResourceMem(&c.Resources)
 		}
 	}
 
