@@ -124,7 +124,7 @@ func (rem *ASGRemediator) getSelfTags() (tags map[string]string) {
 	})
 
 	if err != nil {
-		panic("Unabele to describe autoscaling instances")
+		panic(fmt.Sprintf("Unabele to describe autoscaling instances. Error: %v", err))
 	}
 
 	if len(output.AutoScalingInstances) != 1 {
