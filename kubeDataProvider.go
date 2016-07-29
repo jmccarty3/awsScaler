@@ -96,14 +96,14 @@ func (k *kubeDataProvider) createPodController() {
 }
 
 func getResourceMem(mem *api.ResourceRequirements) int64 {
-	if (*mem.Limits.Cpu() != resource.Quantity{}) {
+	if (*mem.Limits.Cpu() != resource.Quantity{} && mem.Limits.Memory().Value() > 0) {
 		return mem.Limits.Memory().Value() / (1024 * 1024) // Memory is returned as the full value. We want it truncated to Megabytes
 	}
 	return mem.Requests.Memory().Value() / (1024 * 1024) // Memory is returned as the full value. We want it truncated to Megabytes
 }
 
 func getResourceCPU(cpu *api.ResourceRequirements) int64 {
-	if (*cpu.Limits.Cpu() != resource.Quantity{}) {
+	if (*cpu.Limits.Cpu() != resource.Quantity{} && cpu.Limits.Cpu().MilliValue() > 0) {
 		return cpu.Limits.Cpu().MilliValue()
 	}
 	return cpu.Requests.Cpu().MilliValue()
