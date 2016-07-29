@@ -5,15 +5,14 @@ dependencies:
   cache_directories:
     - "vendor" #Speed up builds by remembering what was vendored
   pre:
-    - wget -O glide.zip https://github.com/Masterminds/glide/releases/download/0.10.2/glide-0.10.2-linux-amd64.zip
+    - wget -O glide.zip https://github.com/Masterminds/glide/releases/download/v0.11.1/glide-v0.11.1-linux-amd64.zip
     - unzip -j glide.zip "linux-amd64/glide"
     - |
       echo 'export GO15VENDOREXPERIMENT=1' >> ~/.circlerc
+      echo 'export GOPATH=$HOME/.go_project:$GOPATH' >> ~/.circlerc
   override:
   - mkdir -p $HOME/.go_project/src/github.com/$CIRCLE_PROJECT_USERNAME
   - ln -fs $HOME/$CIRCLE_PROJECT_REPONAME $HOME/.go_project/src/github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME
-  - |
-    echo 'export GOPATH=$HOME/.go_project:$GOPATH' >> ~/.circlerc
   - cd $HOME/.go_project/src/github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME && ./glide update && go get -v -t . && go build
   - docker build -t jmccarty3/awsscaler .
 
