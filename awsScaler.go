@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"net/url"
 
 	"gopkg.in/yaml.v2"
 
@@ -43,31 +42,29 @@ const (
 )
 
 var (
-	argAPIServerURL       = flag.String("api-server", "http://localhost:8080", "Url endpoint of the k8s api server")
+	argAPIServerURL       = flag.String("api-server", "", "Url endpoint of the k8s api server")
 	argConfigFile         = flag.String("config", "", "Path to the configuration file")
 	argRemediationMinutes = flag.Int64("remediation-timer", 5, "Time in (minutes) until remediation attempt")
 	argSyncNow            = flag.Bool("sync-now", false, "Sync as soon as initial sync is complete")
 	argSelfTest           = flag.Bool("self-test", false, "Startup Test")
 )
 
-//TODO: Support incluster Config
-func getAPIServerURL() (string, error) {
-	//More parsing later
-	url, err := url.Parse(*argAPIServerURL)
-	return url.String(), err
-}
-
 func getAPIClient() (*kclient.Client, error) {
-	url, err := getAPIServerURL()
+	var restConfig *restclient.Config
+	var err error
+
+	if *argAPIServerURL == "" {
+		glog.Info("No API Endpoint. Using incluster config")
+		restConfig, err = restclient.InClusterConfig()
+	} else {
+		restConfig = &restclient.Config{
+			Host: *argAPIServerURL,
+		}
+	}
 
 	if err != nil {
-		glog.Error(err)
+		glog.Errorf("Could not create rest config: %v", nil)
 		return nil, err
-	}
-	var restConfig *restclient.Config
-
-	restConfig = &restclient.Config{
-		Host: url,
 	}
 
 	return kclient.New(restConfig)
