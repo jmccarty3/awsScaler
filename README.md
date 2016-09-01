@@ -35,7 +35,7 @@ stratagies:
 
 ### Important Notes
 * During a remediation cycle, a pod may only match a single stratagy (if the stratagy was able to take action)
-* If multiple autoscaling groups are used within a stratagy, each will have an change for scaling to remediate the pending pods
+* If multiple autoscaling groups are used within a stratagy, each will have a chance to scale in order to remediate the pending pods
 * Autoscaling groups may be ordered using the tag "scaler_priority"
 * Groups found by tag are evaluated every time a stratagy is executed
 * When possible, the resources (CPU/MEMORY) of pods will be measured against the resources provided by the Instance Type. This allows multiple pods to possible be "remediated" by a single server scaling. Or by scaling multiple servers as needed
