@@ -76,6 +76,10 @@ var resources map[string]api.Resources
 func getResourceForInstanceType(instanceType *string) api.Resources {
 	mapSync.Do(func() {
 		resources = make(map[string]api.Resources)
+		resources[ec2.InstanceTypeC4Xlarge] = api.Resources{
+			CPU:   4000,
+			MemMB: 7500,
+		}
 		resources[ec2.InstanceTypeC42xlarge] = api.Resources{
 			CPU:   8000,
 			MemMB: 15000,
