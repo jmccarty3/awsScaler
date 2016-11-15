@@ -65,8 +65,18 @@ func (k *kubeDataProvider) recolmation() {
 	pods, _ := k.pods.List(labels.Everything())
 	for _, pod := range pods {
 		if pod.Status.Phase == api.PodPending && pod.CreationTimestamp.Before(unversioned.NewTime(remTime)) {
-			key, _ := cache.MetaNamespaceKeyFunc(pod)
-			k.state.setPodState(key, pod)
+			creating := false
+			for _, cs := range pod.Status.ContainerStatuses {
+				if cs.State.Waiting != nil && cs.State.Waiting.Reason == "ContainerCreating" {
+					creating = true
+					break
+				}
+			}
+			if !creating {
+				key, _ := cache.MetaNamespaceKeyFunc(pod)
+				k.state.setPodState(key, pod)
+			}
+
 		}
 	}
 
