@@ -57,6 +57,21 @@ func printEvent(e *api.Event) string {
 	return fmt.Sprintf("Name: %s Reason: %s Source: %s Count: %d Message: %s ", e.Name, e.Reason, e.Source, e.Count, e.Message)
 }
 
+func isPodStatusFine(pod *api.Pod) bool {
+	if pod.Status.Phase != api.PodPending {
+		return true
+	}
+
+	//Pod can still be pending but in the creating state which means its been scheduled
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.State.Waiting != nil && cs.State.Waiting.Reason == "ContainerCreating" {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (k *kubeDataProvider) recolmation() {
 	glog.V(4).Infof("Running Recolomation over %d pods", len(k.pods.Store.List()))
 	remTime := time.Now().Add(-time.Duration(*argRemediationMinutes) * time.Minute)
@@ -65,24 +80,16 @@ func (k *kubeDataProvider) recolmation() {
 	pods, _ := k.pods.List(labels.Everything())
 	for _, pod := range pods {
 		if pod.Status.Phase == api.PodPending && pod.CreationTimestamp.Before(unversioned.NewTime(remTime)) {
-			creating := false
-			for _, cs := range pod.Status.ContainerStatuses {
-				if cs.State.Waiting != nil && cs.State.Waiting.Reason == "ContainerCreating" {
-					creating = true
-					break
-				}
-			}
-			if !creating {
+			if !isPodStatusFine(pod) {
 				key, _ := cache.MetaNamespaceKeyFunc(pod)
 				k.state.setPodState(key, pod)
 			}
-
 		}
 	}
 
 	// Remove any lingering events related to non existant pods
 	for _, pod := range k.state.getPods() {
-		if p, exists, _ := k.pods.Get(pod); exists == false || p.(*api.Pod).Status.Phase != api.PodPending {
+		if p, exists, _ := k.pods.Get(pod); exists == false || isPodStatusFine(p.(*api.Pod)) {
 			key, _ := cache.MetaNamespaceKeyFunc(pod)
 			k.state.removePod(key)
 		}
