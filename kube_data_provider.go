@@ -6,7 +6,7 @@ import (
 
 	"github.com/golang/glog"
 	rapi "github.com/jmccarty3/awsScaler/api"
-	"github.com/jmccarty3/awsScaler/api/stratagy"
+	"github.com/jmccarty3/awsScaler/api/strategy"
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/resource"
 	"k8s.io/kubernetes/pkg/api/unversioned"
@@ -27,7 +27,7 @@ type kubeDataProvider struct {
 	client     *kclient.Client
 	state      *ScheduleState
 	pods       cache.StoreToPodLister
-	stratageis []stratagy.RemediationStratagy
+	strategies []strategy.RemediationStrategy
 
 	podController *framework.Controller
 }
@@ -152,7 +152,7 @@ func (k *kubeDataProvider) doWork() {
 		podsToRemediate := k.state.getPods()
 		podsCanFix := []*api.Pod{}
 
-		for _, s := range k.stratageis {
+		for _, s := range k.strategies {
 			podsCanFix, podsToRemediate = s.FilterPods(podsToRemediate)
 
 			if len(podsCanFix) > 0 {
@@ -167,13 +167,13 @@ func (k *kubeDataProvider) doWork() {
 		}
 
 		if len(podsToRemediate) > 0 {
-			glog.Warningf("Unable to find stratagy for %d pods\n", len(podsToRemediate))
+			glog.Warningf("Unable to find strategy for %d pods\n", len(podsToRemediate))
 		}
 		k.state.incrementRemediations()
 	}
 }
 
-func (k *kubeDataProvider) Run(stratagies []stratagy.RemediationStratagy) {
+func (k *kubeDataProvider) Run(strategies []strategy.RemediationStrategy) {
 
 	go k.podController.Run(wait.NeverStop)
 	glog.Info("Waiting for PodContoller sync")
@@ -181,7 +181,7 @@ func (k *kubeDataProvider) Run(stratagies []stratagy.RemediationStratagy) {
 		time.Sleep(1 * time.Second)
 	}
 	glog.Info("Initial PodController sync complete")
-	k.stratageis = stratagies
+	k.strategies = strategies
 
 	if *argSyncNow {
 		k.doWork()

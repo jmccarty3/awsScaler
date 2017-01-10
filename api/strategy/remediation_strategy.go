@@ -1,4 +1,4 @@
-package stratagy
+package strategy
 
 import (
 	"fmt"
@@ -14,15 +14,15 @@ import (
 	kapi "k8s.io/kubernetes/pkg/api"
 )
 
-//RemediationStratagy represents a stratagy to resolve unscheduled pods
-type RemediationStratagy struct {
+//RemediationStrategy represents a strategy to resolve unscheduled pods
+type RemediationStrategy struct {
 	Namespaces   *rapi.NamespaceCondition `yaml:",flow"`
 	NodeSelector *rapi.NodeSelectorCondition
 	Remediators  []remediation.Remediator
 }
 
-//remediationStratagyYaml represents a simplified representation of a RemediationStratagy used for unmarshalling
-type remediationStratagyYaml struct {
+//remediationStrategyYaml represents a simplified representation of a RemediationStrategy used for unmarshalling
+type remediationStrategyYaml struct {
 	Namespaces   []string                    `yaml:"namespaces,flow"`
 	NodeSelector *rapi.NodeSelectorCondition `yaml:"nodeSelector,flow"`
 	Remediators  []map[string]interface{}    `yaml:"remediators"`
@@ -50,8 +50,8 @@ func prettyPrintValueStats(statObj reflect.Value) {
 }
 
 //UnmarshalYAML performs custom unmarshalling from yaml
-func (s *RemediationStratagy) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	in := &remediationStratagyYaml{}
+func (s *RemediationStrategy) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	in := &remediationStrategyYaml{}
 
 	if err := unmarshal(&in); err != nil {
 		return err
@@ -89,7 +89,7 @@ func (s *RemediationStratagy) UnmarshalYAML(unmarshal func(interface{}) error) e
 
 //FilterPods filters the pods to find a matches that passes all conditions
 // Return a list of pods able to help
-func (s *RemediationStratagy) FilterPods(available []*kapi.Pod) (canRemediate, remainingPods []*kapi.Pod) {
+func (s *RemediationStrategy) FilterPods(available []*kapi.Pod) (canRemediate, remainingPods []*kapi.Pod) {
 	//TODO Consider preallocating size
 	var validPods = []*kapi.Pod{}
 	var invalidPods = []*kapi.Pod{}
@@ -116,8 +116,8 @@ func (s *RemediationStratagy) FilterPods(available []*kapi.Pod) (canRemediate, r
 }
 
 //DoRemediation attempt to do remediation
-//Can only optomistically scale based on resources
-func (s *RemediationStratagy) DoRemediation(resources *rapi.Resources) (remainingResources *rapi.Resources, err error) {
+//Can only optimistically scale based on resources
+func (s *RemediationStrategy) DoRemediation(resources *rapi.Resources) (remainingResources *rapi.Resources, err error) {
 	remainingResources = resources
 	err = nil
 	success := false

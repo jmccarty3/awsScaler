@@ -105,7 +105,7 @@ func main() {
 	}
 
 	provider := newKubeDataProvider(c)
-	provider.Run(config.Stratagies)
+	provider.Run(config.Strategies)
 
 	c.Pods(api.NamespaceAll)
 

@@ -1,4 +1,4 @@
-package stratagy
+package strategy
 
 import (
 	"testing"
@@ -54,7 +54,7 @@ func (t *testCondition) UnmarshalFromYaml(data []byte) error {
 	return yaml.Unmarshal(data, t)
 }
 
-func TestRemediationStratagyUnmarshal(t *testing.T) {
+func TestRemediationStrategyUnmarshal(t *testing.T) {
 	var testConfig = `
 namespaces:
 - foo
@@ -66,7 +66,7 @@ remediators:
     names:
     - foo
 `
-	var strat RemediationStratagy
+	var strat RemediationStrategy
 	err := yaml.Unmarshal([]byte(testConfig), &strat)
 
 	if err != nil {
@@ -106,12 +106,12 @@ func TestFilterPods(t *testing.T) {
 	}
 
 	tests := []struct {
-		stratagy     RemediationStratagy
+		strategy     RemediationStrategy
 		successCount int
 		failCount    int
 	}{
 		{
-			stratagy: RemediationStratagy{
+			strategy: RemediationStrategy{
 				Namespaces: &rapi.NamespaceCondition{
 					Namespaces: []string{"pass"},
 				},
@@ -120,7 +120,7 @@ func TestFilterPods(t *testing.T) {
 			failCount:    0,
 		},
 		{
-			stratagy: RemediationStratagy{
+			strategy: RemediationStrategy{
 				Namespaces: &rapi.NamespaceCondition{
 					Namespaces: []string{"fail"},
 				},
@@ -129,7 +129,7 @@ func TestFilterPods(t *testing.T) {
 			failCount:    len(podList),
 		},
 		{
-			stratagy: RemediationStratagy{
+			strategy: RemediationStrategy{
 				Namespaces: &rapi.NamespaceCondition{
 					Namespaces: []string{"pass"},
 				},
@@ -143,7 +143,7 @@ func TestFilterPods(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		success, fail := test.stratagy.FilterPods(podList)
+		success, fail := test.strategy.FilterPods(podList)
 		if len(success) != test.successCount && len(fail) != test.failCount {
 			t.Errorf("Expected: Success %d Fail %d  Actual: Success %d Fail %d", test.successCount, test.failCount, len(success), len(fail))
 		}

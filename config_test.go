@@ -24,7 +24,7 @@ type TestCondition struct {
 }
 
 var testConfig = `
-stratagies:
+strategies:
 - remediators:
   -  autoScalingGroup:
       names:
@@ -40,13 +40,13 @@ func TestLoadConfig(t *testing.T) {
 		t.Errorf("Unexpected unmarshaling error. %v", err)
 	}
 
-	if len(config.Stratagies) != 1 {
-		fmt.Printf("Config.Rem: %v\n", config.Stratagies)
-		t.Errorf("Unexpected number of stratageis. Expected %d Actual %d", 1, len(config.Stratagies))
+	if len(config.Strategies) != 1 {
+		fmt.Printf("Config.Rem: %v\n", config.Strategies)
+		t.Errorf("Unexpected number of strategies. Expected %d Actual %d", 1, len(config.Strategies))
 	} else {
-		fmt.Printf("Len Rems: %v\n", len(config.Stratagies[0].Remediators))
-		fmt.Printf("Names! : %v\n", config.Stratagies[0].Remediators[0].(*raws.ASGRemediator).Names)
+		fmt.Printf("Len Rems: %v\n", len(config.Strategies[0].Remediators))
+		fmt.Printf("Names! : %v\n", config.Strategies[0].Remediators[0].(*raws.ASGRemediator).Names)
 	}
 
-	fmt.Printf("Config.Strat %v\n", config.Stratagies)
+	fmt.Printf("Config.Strat %v\n", config.Strategies)
 }
