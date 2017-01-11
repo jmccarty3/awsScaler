@@ -63,7 +63,7 @@ func getAPIClient() (*kclient.Client, error) {
 	}
 
 	if err != nil {
-		glog.Errorf("Could not create rest config: %v", nil)
+		glog.Errorf("Could not create rest config: %v", err)
 		return nil, err
 	}
 
@@ -86,28 +86,27 @@ func main() {
 
 	configData, err := ioutil.ReadFile(*argConfigFile)
 	if err != nil {
-		panic(fmt.Sprintf("Error loading conifg file: %v", err))
+		panic(fmt.Sprintf("Error loading config file: %v", err))
 	}
 
 	err = yaml.Unmarshal(configData, &config)
 
 	if err != nil {
-		panic(fmt.Sprintf("Error parsing config file. %v", err))
+		panic(fmt.Sprintf("Error parsing config file: %v", err))
 	}
 
-	c, _ := getAPIClient()
-	v, e := c.ServerVersion() //Verify we can talk to the server
-
-	if e != nil {
-		panic("Unable to fetch server version")
+	kubeApiClient, _ := getAPIClient()
+	version, err := kubeApiClient.ServerVersion() //Verify we can talk to the server
+	if err != nil {
+		panic(fmt.Sprintf("Unable to fetch server version from k8s API: %v", err))
 	} else {
-		fmt.Println("Server Version:", v)
+		fmt.Println("Server Version:", version)
 	}
 
-	provider := newKubeDataProvider(c)
+	provider := newKubeDataProvider(kubeApiClient)
 	provider.Run(config.Strategies)
 
-	c.Pods(api.NamespaceAll)
+	kubeApiClient.Pods(api.NamespaceAll)
 
 	select {}
 }

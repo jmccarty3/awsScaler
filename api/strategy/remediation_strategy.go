@@ -65,22 +65,22 @@ func (s *RemediationStrategy) UnmarshalYAML(unmarshal func(interface{}) error) e
 
 	s.NodeSelector = in.NodeSelector
 
-	for _, r := range in.Remediators {
-		for k, v := range r {
-			c, err := remediation.GetRemediatorCreator(k)
+	for _, remediatorMap := range in.Remediators {
+		for remediatorName, remediatorData := range remediatorMap {
+			create, err := remediation.GetRemediatorCreator(remediatorName)
 			if err != nil {
 				glog.Errorf("%v", err)
 				return err
 			}
-			rem := c(remediation.ConfigData{})
+			remediator := create(remediation.ConfigData{})
 
 			//Remarshal the downstream data for processing
-			reMarsh, _ := yaml.Marshal(v)
-			if err = yaml.Unmarshal(reMarsh, rem); err != nil {
-				glog.Errorf("Error unmarshalling remediator %s with data %v", k, v)
+			reMarsh, _ := yaml.Marshal(remediatorData)
+			if err = yaml.Unmarshal(reMarsh, remediator); err != nil {
+				glog.Errorf("Error unmarshalling remediator %s with data %v", remediatorName, remediatorData)
 				return err
 			}
-			s.Remediators = append(s.Remediators, rem)
+			s.Remediators = append(s.Remediators, remediator)
 		}
 	}
 	s.Remediators = append(s.Remediators)

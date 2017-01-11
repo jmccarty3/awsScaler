@@ -10,60 +10,60 @@ import (
 
 //FailedPod represents a pod that has failed to be scheduled
 type FailedPod struct {
-	Remediations int
+	Remediations int //TODO: I don't see where this is ever used
 	Pod          *api.Pod
 }
 
-//ScheduleState is a collection of pods that have failed to schedule
-type ScheduleState struct {
+//FailedPods is a collection of pods that have failed to schedule
+type FailedPods struct {
 	failedPods map[string]*FailedPod
 
 	//This can likely be changed over to a channel if performance becomes an issue
 	lock sync.Mutex
 }
 
-//NewScheduleState represents pods that have failed to schedule
-func NewScheduleState() *ScheduleState {
-	return &ScheduleState{
+//NewFailedPods represents pods that have failed to schedule
+func NewFailedPods() *FailedPods {
+	return &FailedPods{
 		failedPods: make(map[string]*FailedPod),
 	}
 }
 
-func (s *ScheduleState) setPodState(name string, pod *api.Pod) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+func (f *FailedPods) addPod(name string, pod *api.Pod) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
 	glog.V(4).Infof("Adding Pod: %s", name)
-	s.failedPods[name] = &FailedPod{
-		Remediations: 0,
+	f.failedPods[name] = &FailedPod{
+		Remediations: 0, //TODO: Should this be reset to zero if the pod's already present in the list?
 		Pod:          pod,
 	}
 }
 
-func (s *ScheduleState) getPods() []*api.Pod {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+func (f *FailedPods) getPods() []*api.Pod {
+	f.lock.Lock()
+	defer f.lock.Unlock()
 
-	pods := make([]*api.Pod, len(s.failedPods))
+	pods := make([]*api.Pod, len(f.failedPods))
 	i := 0
 
-	for _, p := range s.failedPods {
+	for _, p := range f.failedPods {
 		pods[i] = p.Pod
 		i++
 	}
 	return pods
 }
 
-func (s *ScheduleState) removePod(name string) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+func (f *FailedPods) removePod(name string) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
 	glog.V(4).Infof("Removing Pod %s from State if exists", name)
-	delete(s.failedPods, name)
+	delete(f.failedPods, name)
 }
 
-func (s *ScheduleState) incrementRemediations() {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	for _, p := range s.failedPods {
+func (f *FailedPods) incrementRemediations() {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	for _, p := range f.failedPods {
 		p.Remediations++
 	}
 }
