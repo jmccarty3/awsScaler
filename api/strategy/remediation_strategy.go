@@ -89,47 +89,40 @@ func (s *RemediationStrategy) UnmarshalYAML(unmarshal func(interface{}) error) e
 
 //FilterPods filters the pods to find a matches that passes all conditions
 // Return a list of pods able to help
-func (s *RemediationStrategy) FilterPods(available []*kapi.Pod) (canRemediate, remainingPods []*kapi.Pod) {
+func (s *RemediationStrategy) FilterPods(pods []*kapi.Pod) (canRemediate, remaining []*kapi.Pod) {
 	//TODO Consider preallocating size
-	var validPods = []*kapi.Pod{}
-	var invalidPods = []*kapi.Pod{}
-
-	for _, p := range available {
-		valid := true
-
-		if s.Namespaces != nil {
-			valid = valid && s.Namespaces.CheckPodValid(p)
-		}
-
-		if s.NodeSelector != nil {
-			valid = valid && s.NodeSelector.CheckPodValid(p)
-		}
-
-		if valid {
-			validPods = append(validPods, p)
+	for _, pod := range pods {
+		matchesNamespaces := s.Namespaces == nil || s.Namespaces.MatchesPod(pod)
+		matchesNodeSelector := s.NodeSelector == nil || s.NodeSelector.MatchesPod(pod)
+		// if all conditions are met, add pod to canRemediate list; otherwise, add to remaining list
+		if matchesNamespaces && matchesNodeSelector {
+			canRemediate = append(canRemediate, pod)
 		} else {
-			invalidPods = append(invalidPods, p)
+			remaining = append(remaining, pod)
 		}
 	}
-
-	return validPods, invalidPods
+	return
 }
 
 //DoRemediation attempt to do remediation
 //Can only optimistically scale based on resources
 func (s *RemediationStrategy) DoRemediation(resources *rapi.Resources) (remainingResources *rapi.Resources, err error) {
 	remainingResources = resources
-	err = nil
-	success := false
 
 	for _, r := range s.Remediators {
 		glog.Infof("Calling remediator for %v resources", remainingResources)
-		if success, remainingResources, _ = r.Remediate(remainingResources); success {
+		var remErr error
+		remainingResources, remErr = r.Remediate(remainingResources)
+		if remErr != nil {
+			glog.Warning("Error remediating resources:", remErr)
+		}
+		if *remainingResources == rapi.EmptyResources {
 			glog.Info("All resourcess remediated")
 			return
 		}
 	}
 
-	glog.Warningf("Unable to remediate all resources. Missing: %v", remainingResources)
+	err = fmt.Errorf("Unable to remediate all resources. Missing: %v", remainingResources)
+	glog.Warning(err)
 	return
 }

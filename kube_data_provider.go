@@ -72,8 +72,8 @@ func isPodStatusFine(pod *api.Pod) bool {
 	return false
 }
 
-// updateFailingPods updates the kubeDataProvider's FailedPods
-func (k *kubeDataProvider) updateFailingPods() {
+// syncFailingPods updates the kubeDataProvider's FailedPods
+func (k *kubeDataProvider) syncFailingPods() {
 	glog.V(4).Infof("Running Recolomation over %d pods", len(k.pods.Store.List())) // TODO: "Reclamation"? Not sure if that's an accurate description of what's happening here...
 	remTime := time.Now().Add(-time.Duration(*argRemediationMinutes) * time.Minute)
 	glog.V(4).Infof("Pods must have been created before %v", remTime)
@@ -144,18 +144,19 @@ func (k *kubeDataProvider) getNeededResources(pods []*api.Pod) *rapi.Resources {
 
 // remediateFailingPods applies its remediation strategies to the currently failing pods
 func (k *kubeDataProvider) remediateFailingPods() {
-	k.updateFailingPods()
+	k.syncFailingPods()
 
 	glog.V(4).Info("StateGraph:", k.failingPods.failedPods)
 
 	//TODO: Move this logic
-	if len(k.failingPods.getPods()) > 0 {
+	remainingPodsToRemediate := k.failingPods.getPods()
+	if len(remainingPodsToRemediate) > 0 {
 		glog.Warning("Nodes in need of remediation. Requesting response")
-		podsToRemediate := k.failingPods.getPods()
+
 		var podsCanFix []*api.Pod
 
 		for _, stratgy := range k.strategies {
-			podsCanFix, podsToRemediate = stratgy.FilterPods(podsToRemediate)
+			podsCanFix, remainingPodsToRemediate = stratgy.FilterPods(remainingPodsToRemediate)
 
 			if len(podsCanFix) > 0 {
 				resources := k.getNeededResources(podsCanFix)
@@ -168,8 +169,8 @@ func (k *kubeDataProvider) remediateFailingPods() {
 			}
 		}
 
-		if len(podsToRemediate) > 0 {
-			glog.Warningf("Unable to find strategy for %d pods\n", len(podsToRemediate))
+		if len(remainingPodsToRemediate) > 0 {
+			glog.Warningf("Unable to find strategy for %d pods\n", len(remainingPodsToRemediate))
 		}
 		k.failingPods.incrementRemediations()
 	}

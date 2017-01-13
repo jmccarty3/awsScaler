@@ -15,7 +15,7 @@ type failPodCondition struct {
 	rapi.PodCondition
 }
 
-func (f failPodCondition) CheckPodValid(pod *kapi.Pod) bool {
+func (f failPodCondition) MatchesPod(pod *kapi.Pod) bool {
 	return false
 }
 
@@ -27,7 +27,7 @@ type successPodCondition struct {
 	rapi.PodCondition
 }
 
-func (f successPodCondition) CheckPodValid(pod *kapi.Pod) bool {
+func (f successPodCondition) MatchesPod(pod *kapi.Pod) bool {
 	return true
 }
 
@@ -46,7 +46,7 @@ type successRemediator struct {
 type testCondition struct {
 }
 
-func (t *testCondition) CheckPodValid(pod *kapi.Pod) bool {
+func (t *testCondition) MatchesPod(pod *kapi.Pod) bool {
 	return true
 }
 

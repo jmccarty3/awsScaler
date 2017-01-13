@@ -1,8 +1,8 @@
 package aws
 
 import (
-	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"time"
@@ -13,6 +13,7 @@ import (
 	"github.com/golang/glog"
 	"github.com/jmccarty3/awsScaler/api"
 	rem "github.com/jmccarty3/awsScaler/api/remediation"
+	"github.com/pkg/errors"
 )
 
 //ScalerPriotiryTagKey tag to use to attempt to order autoscaling groups
@@ -23,17 +24,16 @@ const RemediatorName = "autoScalingGroup"
 
 //ASGConfig used for marshalling data to/from yaml
 type ASGConfig struct {
-	Names    []string `yaml:"names"`
-	Tags     map[string]string
-	SelfTags []string `yaml:"selfTags"`
+	Names       []string `yaml:"names"`
+	Tags        map[string]string
+	SelfTags    []string `yaml:"selfTags"`
+	MaxMachines *int     `yaml:"maxMachines"`
 }
 
 //ASGRemediator attempts to remediate scheduling issues using AutoScalingGroups
 type ASGRemediator struct {
-	Names    []string `yaml:"names"`
-	Tags     map[string]string
-	SelfTags []string `yaml:"selfTags"`
-	client   *autoscaling.AutoScaling
+	ASGConfig
+	client *autoscaling.AutoScaling
 }
 
 func newASGRemediator(config rem.ConfigData) rem.Remediator {
@@ -49,9 +49,7 @@ func newASGRemediator(config rem.ConfigData) rem.Remediator {
 func (asgRemediator *ASGRemediator) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	config := &ASGConfig{}
 	err := unmarshal(&config)
-	asgRemediator.Names = config.Names
-	asgRemediator.Tags = config.Tags
-	asgRemediator.SelfTags = config.SelfTags
+	asgRemediator.ASGConfig = *config
 	return err
 }
 
@@ -69,9 +67,8 @@ func mergeTags(primary, secondary map[string]string) map[string]string {
 }
 
 //Remediate will attempt to increase autoscaling groups to resolve the failed pods
-func (asgRemediator *ASGRemediator) Remediate(neededResources *api.Resources) (bool, *api.Resources, error) {
-	success := false
-	var err error
+func (asgRemediator *ASGRemediator) Remediate(needed *api.Resources) (remainingNeeded *api.Resources, err error) {
+	remainingNeeded = needed
 
 	tags := asgRemediator.Tags
 	if len(asgRemediator.SelfTags) != 0 {
@@ -80,20 +77,22 @@ func (asgRemediator *ASGRemediator) Remediate(neededResources *api.Resources) (b
 	}
 
 	groups, err := asgRemediator.getAllAutoscalingGroups(&asgRemediator.Names, &tags)
-
+	if err != nil {
+		return remainingNeeded, errors.Wrapf(err, "Failed to obtain matching autoscaling groups when attempting remediation.")
+	}
 	if len(groups) == 0 {
-		glog.Error("No autoscaling groups found.")
-		return false, neededResources, nil
+		errMsg := "No autoscaling groups found."
+		glog.Error(errMsg)
+		return remainingNeeded, fmt.Errorf(errMsg)
 	}
 
 	groups = sortAutoScalingGroups(groups)
 
 	for _, group := range groups {
 		glog.Info("Attempting to Remediate using group: ", *group.AutoScalingGroupName)
-		if success, neededResources, err = asgRemediator.attemptRemediate(group, neededResources); success {
-			if *neededResources != api.EmptyResources {
-				glog.Infof("Autoscaling group %s did not fully meet resource need. NeededResources %v", group, neededResources)
-				success = false
+		if remainingNeeded, err = asgRemediator.attemptRemediate(group, remainingNeeded); err == nil {
+			if *remainingNeeded != api.EmptyResources {
+				glog.Infof("Autoscaling group %s did not fully meet resource need. NeededResources %v", group, remainingNeeded)
 				continue
 			}
 			glog.Info("Remediation successful")
@@ -102,7 +101,7 @@ func (asgRemediator *ASGRemediator) Remediate(neededResources *api.Resources) (b
 		glog.Warning("Failed remediation. Error: ", err)
 	}
 
-	return success, neededResources, err
+	return remainingNeeded, err
 }
 
 //TODO condense br returning error and having the calling function panic
@@ -253,36 +252,59 @@ func (asgRemediator *ASGRemediator) getAutoscalingGroup(asGroup string) (*autosc
 	return resp.AutoScalingGroups[0], nil
 }
 
-func (asgRemediator *ASGRemediator) attemptRemediate(asGroup *autoscaling.Group, neededResources *api.Resources) (bool, *api.Resources, error) {
-	if *asGroup.DesiredCapacity == *asGroup.MaxSize {
+func (asgRemediator *ASGRemediator) getMaxMachineCount(asGroup *autoscaling.Group) (int64, error) {
+	if asGroup == nil || asGroup.MaxSize == nil {
+		if asgRemediator.MaxMachines == nil {
+			return math.MaxInt32, fmt.Errorf("Unable to determine max scaling size for autoscaling group %+v", asGroup)
+		}
+		return int64(*asgRemediator.MaxMachines), nil
+	}
+	maxSize := *asGroup.MaxSize
+	if asgRemediator.MaxMachines != nil {
+		maxSize = int64(math.Min(float64(*asgRemediator.MaxMachines), float64(maxSize)))
+	}
+	return maxSize, nil
+}
+
+func (asgRemediator *ASGRemediator) attemptRemediate(asGroup *autoscaling.Group, neededResources *api.Resources) (remainingNeededResources *api.Resources, err error) {
+	maxSize, sizeError := asgRemediator.getMaxMachineCount(asGroup)
+	if sizeError != nil {
+		glog.Warning("Unnable to determine max machine size:", sizeError)
+	}
+	if *asGroup.DesiredCapacity >= maxSize {
 		glog.Warning("Autoscaling group already at max size")
-		return false, neededResources, errors.New("Failed to scale")
+		return neededResources, fmt.Errorf("Failed to scale.  Autoscaling group %s at max size.", asGroup.String())
 	}
 
-	if activity, err := asgRemediator.getCurrentActivity(*asGroup.AutoScalingGroupName); err == nil {
+	activity, err := asgRemediator.getCurrentActivity(*asGroup.AutoScalingGroupName)
+	if err != nil {
+		glog.Error("Could not get current ASG activity", err)
+	} else {
+
 		//TODO Probably a good idea to look at errors
 		if *activity.StatusCode == autoscaling.ScalingActivityStatusCodeFailed && int(*asGroup.DesiredCapacity) > len(asGroup.Instances) {
-			return false, neededResources, errors.New("Autoscaling group last activity failed and desired count exceeds current count. Assuming the worst")
+			return neededResources, errors.New("Autoscaling group last activity failed and desired count exceeds current count. Assuming the worst")
 		}
 
 		if asgRemediator.checkPreInService(activity) {
-			return false, neededResources, errors.New("Autoscaling group in pre service")
+			return neededResources, errors.New("Autoscaling group in pre service")
 		}
 
 		if asgRemediator.checkIsWaitingForSpot(activity) {
 			spotTimeout := 2 //TODO Make configurable if stays
 			glog.Info("Autoscaling group is cluster waiting on spot work. Giving ", spotTimeout, " for instance increase")
-			i := len(asGroup.Instances)
+			initialCount := len(asGroup.Instances)
 			time.Sleep(time.Duration(spotTimeout) * time.Minute)
 			asGroup, err = asgRemediator.getAutoscalingGroup(*asGroup.AutoScalingGroupName)
-			if i >= len(asGroup.Instances) {
-				glog.Error("Instance group has not increased members. Assuming the worst")
-				return false, neededResources, errors.New("Spot cluster increase seems to have failed")
+			if err != nil {
+				glog.Warning("Error obtaining autoscaling group:", err)
 			}
-
+			if initialCount >= len(asGroup.Instances) {
+				glog.Error("Instance group has not increased members. Assuming the worst")
+				return neededResources, errors.New("Spot cluster increase seems to have failed")
+			}
 		}
-	} else {
-		glog.Error("Could not get current ASG activity", err)
+
 	}
 
 	//Determine how many servers we should
@@ -292,29 +314,26 @@ func (asgRemediator *ASGRemediator) attemptRemediate(asGroup *autoscaling.Group,
 	glog.Infof("Need %v servers from group %s", neededCount, *asGroup.AutoScalingGroupName)
 
 	sizeToScaleTo := len(asGroup.Instances) + neededCount
-	if sizeToScaleTo > int(*asGroup.MaxSize) {
-		neededCount = int(*asGroup.MaxSize) - len(asGroup.Instances)
-		sizeToScaleTo = int(*asGroup.MaxSize) //No risk of truncate since Max Size cannot be anywhere near max int
+	if int64(sizeToScaleTo) > maxSize {
 		glog.Info("Desired capacity too large. Setting to Max.")
+		sizeToScaleTo = int(maxSize) // No risk of truncate since Max Size cannot be anywhere near max int when sizeToScaleTo exceeds it
+		neededCount = sizeToScaleTo - len(asGroup.Instances)
 	}
 
-	err := asgRemediator.scaleGroup(*asGroup.AutoScalingGroupName, int64(sizeToScaleTo))
-	glog.Info("Requested group capacity increase for:", *asGroup.AutoScalingGroupName)
-
+	glog.Info("Requesting group capacity increase for:", *asGroup.AutoScalingGroupName)
+	err = asgRemediator.scaleGroup(*asGroup.AutoScalingGroupName, int64(sizeToScaleTo))
 	if err != nil {
-		return false, neededResources, err
+		return neededResources, errors.Wrapf(err, "Error scaling group %s", asGroup.String())
 	}
 
-	resourcePerMachine.Scale(int64(neededCount))
+	resourcesAdded := resourcePerMachine.Scale(int64(neededCount))
 
-	if resourcePerMachine == api.EmptyResources {
+	if *resourcesAdded == api.EmptyResources {
 		glog.Warning("Unable to determine now many resources were created. Optimistically assuming everything is fixed")
-		return true, &api.EmptyResources, nil
+		return &api.EmptyResources, nil
 	}
 
-	remainingNeed := neededResources
-	remainingNeed.Remove(&resourcePerMachine)
-	return true, remainingNeed, nil
+	return neededResources.Remove(resourcesAdded), nil
 }
 
 func (asgRemediator *ASGRemediator) scaleGroup(name string, size int64) error {
