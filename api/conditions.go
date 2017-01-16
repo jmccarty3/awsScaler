@@ -45,9 +45,9 @@ func GetConditionCreator(name string) (ConditionCreator, error) {
 	return nil, fmt.Errorf("%s is an unknown condition", name)
 }
 
-//PodCondition determines if a pod is valid
+//PodCondition conditionally matches pods
 type PodCondition interface {
-	CheckPodValid(pod *kapi.Pod) bool
+	MatchesPod(pod *kapi.Pod) bool
 }
 
 //NamespaceCondition ensures that a pod belongs to a valid namespace
@@ -61,8 +61,8 @@ type NodeSelectorCondition struct {
 	NodeSelector labels.Selector
 }
 
-//CheckPodValid verifies pod validity
-func (c *NamespaceCondition) CheckPodValid(pod *kapi.Pod) bool {
+//MatchesPod returns true iff pod meets the namespace condition
+func (c *NamespaceCondition) MatchesPod(pod *kapi.Pod) bool {
 	for _, namespace := range c.Namespaces {
 		if namespace == pod.Namespace {
 			return true
@@ -126,8 +126,8 @@ func cleanUpMapUnmarshal(input map[interface{}]interface{}) map[string]string {
 	return output
 }
 
-//CheckPodValid verifies pod validity
-func (c *NodeSelectorCondition) CheckPodValid(pod *kapi.Pod) bool {
+//MatchesPod verifies pod validity
+func (c *NodeSelectorCondition) MatchesPod(pod *kapi.Pod) bool {
 	return c.NodeSelector.Matches(labels.Set(pod.Spec.NodeSelector))
 }
 

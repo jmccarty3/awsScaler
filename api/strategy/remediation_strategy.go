@@ -1,4 +1,4 @@
-package stratagy
+package strategy
 
 import (
 	"fmt"
@@ -14,15 +14,15 @@ import (
 	kapi "k8s.io/kubernetes/pkg/api"
 )
 
-//RemediationStratagy represents a stratagy to resolve unscheduled pods
-type RemediationStratagy struct {
+//RemediationStrategy represents a strategy to resolve unscheduled pods
+type RemediationStrategy struct {
 	Namespaces   *rapi.NamespaceCondition `yaml:",flow"`
 	NodeSelector *rapi.NodeSelectorCondition
 	Remediators  []remediation.Remediator
 }
 
-//remediationStratagyYaml represents a simplified representation of a RemediationStratagy used for unmarshalling
-type remediationStratagyYaml struct {
+//remediationStrategyYaml represents a simplified representation of a RemediationStrategy used for unmarshalling
+type remediationStrategyYaml struct {
 	Namespaces   []string                    `yaml:"namespaces,flow"`
 	NodeSelector *rapi.NodeSelectorCondition `yaml:"nodeSelector,flow"`
 	Remediators  []map[string]interface{}    `yaml:"remediators"`
@@ -50,8 +50,8 @@ func prettyPrintValueStats(statObj reflect.Value) {
 }
 
 //UnmarshalYAML performs custom unmarshalling from yaml
-func (s *RemediationStratagy) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	in := &remediationStratagyYaml{}
+func (s *RemediationStrategy) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	in := &remediationStrategyYaml{}
 
 	if err := unmarshal(&in); err != nil {
 		return err
@@ -65,22 +65,22 @@ func (s *RemediationStratagy) UnmarshalYAML(unmarshal func(interface{}) error) e
 
 	s.NodeSelector = in.NodeSelector
 
-	for _, r := range in.Remediators {
-		for k, v := range r {
-			c, err := remediation.GetRemediatorCreator(k)
+	for _, remediatorMap := range in.Remediators {
+		for remediatorName, remediatorData := range remediatorMap {
+			create, err := remediation.GetRemediatorCreator(remediatorName)
 			if err != nil {
 				glog.Errorf("%v", err)
 				return err
 			}
-			rem := c(remediation.ConfigData{})
+			remediator := create(remediation.ConfigData{})
 
 			//Remarshal the downstream data for processing
-			reMarsh, _ := yaml.Marshal(v)
-			if err = yaml.Unmarshal(reMarsh, rem); err != nil {
-				glog.Errorf("Error unmarshalling remediator %s with data %v", k, v)
+			reMarsh, _ := yaml.Marshal(remediatorData)
+			if err = yaml.Unmarshal(reMarsh, remediator); err != nil {
+				glog.Errorf("Error unmarshalling remediator %s with data %v", remediatorName, remediatorData)
 				return err
 			}
-			s.Remediators = append(s.Remediators, rem)
+			s.Remediators = append(s.Remediators, remediator)
 		}
 	}
 	s.Remediators = append(s.Remediators)
@@ -89,47 +89,40 @@ func (s *RemediationStratagy) UnmarshalYAML(unmarshal func(interface{}) error) e
 
 //FilterPods filters the pods to find a matches that passes all conditions
 // Return a list of pods able to help
-func (s *RemediationStratagy) FilterPods(available []*kapi.Pod) (canRemediate, remainingPods []*kapi.Pod) {
+func (s *RemediationStrategy) FilterPods(pods []*kapi.Pod) (canRemediate, remaining []*kapi.Pod) {
 	//TODO Consider preallocating size
-	var validPods = []*kapi.Pod{}
-	var invalidPods = []*kapi.Pod{}
-
-	for _, p := range available {
-		valid := true
-
-		if s.Namespaces != nil {
-			valid = valid && s.Namespaces.CheckPodValid(p)
-		}
-
-		if s.NodeSelector != nil {
-			valid = valid && s.NodeSelector.CheckPodValid(p)
-		}
-
-		if valid {
-			validPods = append(validPods, p)
+	for _, pod := range pods {
+		matchesNamespaces := s.Namespaces == nil || s.Namespaces.MatchesPod(pod)
+		matchesNodeSelector := s.NodeSelector == nil || s.NodeSelector.MatchesPod(pod)
+		// if all conditions are met, add pod to canRemediate list; otherwise, add to remaining list
+		if matchesNamespaces && matchesNodeSelector {
+			canRemediate = append(canRemediate, pod)
 		} else {
-			invalidPods = append(invalidPods, p)
+			remaining = append(remaining, pod)
 		}
 	}
-
-	return validPods, invalidPods
+	return
 }
 
 //DoRemediation attempt to do remediation
-//Can only optomistically scale based on resources
-func (s *RemediationStratagy) DoRemediation(resources *rapi.Resources) (remainingResources *rapi.Resources, err error) {
+//Can only optimistically scale based on resources
+func (s *RemediationStrategy) DoRemediation(resources *rapi.Resources) (remainingResources *rapi.Resources, err error) {
 	remainingResources = resources
-	err = nil
-	success := false
 
 	for _, r := range s.Remediators {
 		glog.Infof("Calling remediator for %v resources", remainingResources)
-		if success, remainingResources, _ = r.Remediate(remainingResources); success {
+		var remErr error
+		remainingResources, remErr = r.Remediate(remainingResources)
+		if remErr != nil {
+			glog.Warning("Error remediating resources:", remErr)
+		}
+		if *remainingResources == rapi.EmptyResources {
 			glog.Info("All resourcess remediated")
 			return
 		}
 	}
 
-	glog.Warningf("Unable to remediate all resources. Missing: %v", remainingResources)
+	err = fmt.Errorf("Unable to remediate all resources. Missing: %v", remainingResources)
+	glog.Warning(err)
 	return
 }

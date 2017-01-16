@@ -6,7 +6,7 @@ import (
 
 	"github.com/golang/glog"
 	rapi "github.com/jmccarty3/awsScaler/api"
-	"github.com/jmccarty3/awsScaler/api/stratagy"
+	"github.com/jmccarty3/awsScaler/api/strategy"
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/resource"
 	"k8s.io/kubernetes/pkg/api/unversioned"
@@ -24,18 +24,18 @@ const (
 )
 
 type kubeDataProvider struct {
-	client     *kclient.Client
-	state      *ScheduleState
-	pods       cache.StoreToPodLister
-	stratageis []stratagy.RemediationStratagy
+	client      *kclient.Client
+	failingPods *FailedPods
+	pods        cache.StoreToPodLister
+	strategies  []strategy.RemediationStrategy
 
 	podController *framework.Controller
 }
 
 func newKubeDataProvider(client *kclient.Client) *kubeDataProvider {
 	c := &kubeDataProvider{
-		client: client,
-		state:  NewScheduleState(),
+		client:      client,
+		failingPods: NewFailedPods(),
 	}
 
 	c.createPodController()
@@ -72,8 +72,9 @@ func isPodStatusFine(pod *api.Pod) bool {
 	return false
 }
 
-func (k *kubeDataProvider) recolmation() {
-	glog.V(4).Infof("Running Recolomation over %d pods", len(k.pods.Store.List()))
+// syncFailingPods updates the kubeDataProvider's FailedPods
+func (k *kubeDataProvider) syncFailingPods() {
+	glog.V(4).Infof("Running Recolomation over %d pods", len(k.pods.Store.List())) // TODO: "Reclamation"? Not sure if that's an accurate description of what's happening here...
 	remTime := time.Now().Add(-time.Duration(*argRemediationMinutes) * time.Minute)
 	glog.V(4).Infof("Pods must have been created before %v", remTime)
 	// Find unscheduled pods
@@ -82,19 +83,19 @@ func (k *kubeDataProvider) recolmation() {
 		if pod.Status.Phase == api.PodPending && pod.CreationTimestamp.Before(unversioned.NewTime(remTime)) {
 			if !isPodStatusFine(pod) {
 				key, _ := cache.MetaNamespaceKeyFunc(pod)
-				k.state.setPodState(key, pod)
+				k.failingPods.addPod(key, pod)
 			}
 		}
 	}
 
 	// Remove any lingering events related to non existant pods
-	for _, pod := range k.state.getPods() {
-		if p, exists, _ := k.pods.Get(pod); exists == false || isPodStatusFine(p.(*api.Pod)) {
+	for _, pod := range k.failingPods.getPods() {
+		if p, exists, _ := k.pods.Get(pod); !exists || isPodStatusFine(p.(*api.Pod)) {
 			key, _ := cache.MetaNamespaceKeyFunc(pod)
-			k.state.removePod(key)
+			k.failingPods.removePod(key)
 		}
 	}
-	glog.V(4).Info("Finished Recolomation")
+	glog.V(4).Info("Finished Recolomation") // TODO: clarify this statement
 }
 
 func (k *kubeDataProvider) createPodController() {
@@ -106,7 +107,7 @@ func (k *kubeDataProvider) createPodController() {
 			DeleteFunc: func(oldObj interface{}) {
 				glog.V(4).Info("Deleting pod: ", oldObj.(*api.Pod).Name)
 				key, _ := cache.MetaNamespaceKeyFunc(oldObj.(*api.Pod))
-				k.state.removePod(key)
+				k.failingPods.removePod(key)
 			},
 		},
 	)
@@ -141,24 +142,26 @@ func (k *kubeDataProvider) getNeededResources(pods []*api.Pod) *rapi.Resources {
 	}
 }
 
-func (k *kubeDataProvider) doWork() {
-	k.recolmation()
+// remediateFailingPods applies its remediation strategies to the currently failing pods
+func (k *kubeDataProvider) remediateFailingPods() {
+	k.syncFailingPods()
 
-	glog.V(4).Info("StateGraph:", k.state.failedPods)
+	glog.V(4).Info("StateGraph:", k.failingPods.failedPods)
 
 	//TODO: Move this logic
-	if len(k.state.getPods()) > 0 {
-		glog.Warning("Nodes in need for remediation. Requesting response")
-		podsToRemediate := k.state.getPods()
-		podsCanFix := []*api.Pod{}
+	remainingPodsToRemediate := k.failingPods.getPods()
+	if len(remainingPodsToRemediate) > 0 {
+		glog.Warning("Nodes in need of remediation. Requesting response")
 
-		for _, s := range k.stratageis {
-			podsCanFix, podsToRemediate = s.FilterPods(podsToRemediate)
+		var podsCanFix []*api.Pod
+
+		for _, stratgy := range k.strategies {
+			podsCanFix, remainingPodsToRemediate = stratgy.FilterPods(remainingPodsToRemediate)
 
 			if len(podsCanFix) > 0 {
-				r := k.getNeededResources(podsCanFix)
-				glog.Infof("Missing Resources. CPU: %d  MemMB: %d Pod Count: %d", r.CPU, r.MemMB, len(k.state.getPods()))
-				if unresolved, err := s.DoRemediation(r); *unresolved == rapi.EmptyResources {
+				resources := k.getNeededResources(podsCanFix)
+				glog.Infof("Missing Resources. CPU: %d  MemMB: %d Pod Count: %d", resources.CPU, resources.MemMB, len(k.failingPods.getPods()))
+				if unresolved, err := stratgy.DoRemediation(resources); *unresolved == rapi.EmptyResources {
 					glog.Info("Remediation request successful")
 				} else {
 					glog.Errorf("Remediation failed. Error: %v Leftover Resources: %v", err, unresolved)
@@ -166,14 +169,14 @@ func (k *kubeDataProvider) doWork() {
 			}
 		}
 
-		if len(podsToRemediate) > 0 {
-			glog.Warningf("Unable to find stratagy for %d pods\n", len(podsToRemediate))
+		if len(remainingPodsToRemediate) > 0 {
+			glog.Warningf("Unable to find strategy for %d pods\n", len(remainingPodsToRemediate))
 		}
-		k.state.incrementRemediations()
+		k.failingPods.incrementRemediations()
 	}
 }
 
-func (k *kubeDataProvider) Run(stratagies []stratagy.RemediationStratagy) {
+func (k *kubeDataProvider) Run(strategies []strategy.RemediationStrategy) {
 
 	go k.podController.Run(wait.NeverStop)
 	glog.Info("Waiting for PodContoller sync")
@@ -181,15 +184,15 @@ func (k *kubeDataProvider) Run(stratagies []stratagy.RemediationStratagy) {
 		time.Sleep(1 * time.Second)
 	}
 	glog.Info("Initial PodController sync complete")
-	k.stratageis = stratagies
+	k.strategies = strategies
 
 	if *argSyncNow {
-		k.doWork()
+		k.remediateFailingPods()
 	}
 
 	for {
 		time.Sleep(time.Minute * time.Duration(*argRemediationMinutes))
-		k.doWork()
+		k.remediateFailingPods()
 
 	}
 }
