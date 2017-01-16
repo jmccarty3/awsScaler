@@ -16,8 +16,8 @@ import (
 	"github.com/pkg/errors"
 )
 
-//ScalerPriotiryTagKey tag to use to attempt to order autoscaling groups
-const ScalerPriotiryTagKey = "scaler_priority"
+//ScalerPriorityTagKey tag to use to attempt to order autoscaling groups
+const ScalerPriorityTagKey = "scaler_priority"
 
 //RemediatorName name to use when registering the remediator
 const RemediatorName = "autoScalingGroup"
@@ -183,7 +183,7 @@ func (a ByTag) Less(i, j int) bool {
 
 func extractPriority(tags []*autoscaling.TagDescription) int {
 	for _, t := range tags {
-		if *t.Key == ScalerPriotiryTagKey {
+		if *t.Key == ScalerPriorityTagKey {
 			p, err := strconv.Atoi(*t.Value)
 			if err != nil {
 				glog.Errorf("Error parsing %s to int\n", *t.Value)
@@ -253,17 +253,23 @@ func (asgRemediator *ASGRemediator) getAutoscalingGroup(asGroup string) (*autosc
 }
 
 func (asgRemediator *ASGRemediator) getMaxMachineCount(asGroup *autoscaling.Group) (int64, error) {
-	if asGroup == nil || asGroup.MaxSize == nil {
-		if asgRemediator.MaxMachines == nil {
+	switch {
+	case asGroup == nil || asGroup.MaxSize == nil: // group has no max size
+		// if no valid config max size, return MaxInt32 and error; else return config max size
+		if asgRemediator.MaxMachines == nil || *asgRemediator.MaxMachines < 1 {
 			return math.MaxInt32, fmt.Errorf("Unable to determine max scaling size for autoscaling group %+v", asGroup)
 		}
 		return int64(*asgRemediator.MaxMachines), nil
+
+	case asgRemediator.MaxMachines == nil: // group has max size, but no config max size
+		return *asGroup.MaxSize, nil
+
+	case *asgRemediator.MaxMachines < 1: // group has max size, but invalid config max size
+		return *asGroup.MaxSize, fmt.Errorf("Invalid MaxMachines configuration value specified (%d). Ignoring.", *asgRemediator.MaxMachines)
+
+	default: // group and config have max size
+		return int64(math.Min(float64(*asgRemediator.MaxMachines), float64(*asGroup.MaxSize))), nil
 	}
-	maxSize := *asGroup.MaxSize
-	if asgRemediator.MaxMachines != nil {
-		maxSize = int64(math.Min(float64(*asgRemediator.MaxMachines), float64(maxSize)))
-	}
-	return maxSize, nil
 }
 
 func (asgRemediator *ASGRemediator) attemptRemediate(asGroup *autoscaling.Group, neededResources *api.Resources) (remainingNeededResources *api.Resources, err error) {
