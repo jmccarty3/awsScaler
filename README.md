@@ -22,6 +22,7 @@ strategies:
           foo: bar
         names:
           asg-foobar
+        maxMachines: 5
 - remediators:
   - autoScalingGroup:
       selfTags:
@@ -29,7 +30,7 @@ strategies:
 ```
 ### Quick Explanation:
 1. Any Pod with a node selector containing both "usage=worker" and "foo=bar" will cause the scaler to locate autoscaling groups with tags "foo=bar" and scale up the desired amount
-2. Any Pod within namespace "alpha" or "beta" will cause the scaler to locate and attempt to scale an autoscaling group tagged "foo=bar" or named "asg-foobar".
+2. Any Pod within namespace "alpha" or "beta" will cause the scaler to locate and attempt to scale an autoscaling group tagged "foo=bar" or named "asg-foobar".  In addition, the autoscaling group will scale to no more than a maximum of 5 machines.
 3. Any Pod will cause the scaler to attempt to scale up an autoscaling group with the same key/value pair for "api-server" that the scaler is associated with.
 
 ### Important Notes
