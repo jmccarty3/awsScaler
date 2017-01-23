@@ -12,13 +12,15 @@ type Resources struct {
 }
 
 //Scale scales the resource values by given value
-func (r *Resources) Scale(scaler int64) {
+func (r *Resources) Scale(scaler int64) *Resources {
 	r.CPU *= scaler
 	r.MemMB *= scaler
+	return r
 }
 
 //Remove removes the specified resource amound from the object. Returns 0 or remaining for each
-func (r *Resources) Remove(toRemove *Resources) {
+func (r *Resources) Remove(toRemove *Resources) *Resources {
 	r.CPU = int64(math.Max(float64(0), float64(r.CPU-toRemove.CPU)))
 	r.MemMB = int64(math.Max(float64(0), float64(r.MemMB-toRemove.MemMB)))
+	return r
 }

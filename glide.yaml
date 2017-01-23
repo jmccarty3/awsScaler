@@ -15,3 +15,6 @@ import:
   subpackages:
   - pkg
 - package: github.com/docker/go-units
+- package: github.com/golang/mock
+  subpackages:
+  - gomock

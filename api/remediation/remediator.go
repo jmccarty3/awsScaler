@@ -9,8 +9,7 @@ import (
 
 //Remediator is responsible for taking action to resolve resource issues
 type Remediator interface {
-	Remediate(resources *api.Resources) (success bool, remaining *api.Resources, err error)
-	//filterAndRemediate(available []*api.Pod) (remainingResources *Resources, err error)
+	Remediate(needed *api.Resources) (remainingNeeded *api.Resources, err error)
 }
 
 //ConfigData contains information required to configure a remediator

@@ -137,7 +137,7 @@ func calculatedNeededServersForConfig(config *autoscaling.LaunchConfiguration, r
 	return val, congfigResources
 }
 
-func getLaunchConfig(client *autoscaling.AutoScaling, configName string) (*autoscaling.LaunchConfiguration, error) {
+func getLaunchConfig(client AutoscalingClient, configName string) (*autoscaling.LaunchConfiguration, error) {
 	params := &autoscaling.DescribeLaunchConfigurationsInput{
 		LaunchConfigurationNames: []*string{
 			aws.String(configName),

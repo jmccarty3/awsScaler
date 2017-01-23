@@ -1,4 +1,4 @@
-stratagies:
+strategies:
 - remediators:
   - autoScalingGroup:
       names:

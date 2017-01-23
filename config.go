@@ -3,14 +3,14 @@ package main
 import (
 	"fmt"
 
-	"github.com/jmccarty3/awsScaler/api/stratagy"
+	"github.com/jmccarty3/awsScaler/api/strategy"
 
 	"gopkg.in/yaml.v2"
 )
 
 //Config represents configuration information for the scaler
 type Config struct {
-	Stratagies []stratagy.RemediationStratagy `yaml:"stratagies"`
+	Strategies []strategy.RemediationStrategy `yaml:"strategies"`
 }
 
 //TODO Remove this
