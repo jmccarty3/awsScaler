@@ -105,6 +105,10 @@ func (k *kubeDataProvider) createPodController() {
 		0,
 		framework.ResourceEventHandlerFuncs{
 			DeleteFunc: func(oldObj interface{}) {
+				//If the function is triggered due to a missed watch event we need the object within the struct.
+				if unknown, ok := oldObj.(cache.DeletedFinalStateUnknown); ok {
+					oldObj = unknown.Obj
+				}
 				glog.V(4).Info("Deleting pod: ", oldObj.(*api.Pod).Name)
 				key, _ := cache.MetaNamespaceKeyFunc(oldObj.(*api.Pod))
 				k.failingPods.removePod(key)
